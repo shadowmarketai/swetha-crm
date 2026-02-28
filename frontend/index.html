@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary SEO -->
+    <title>VoiceFlow AI — Voice Marketing Platform for Indian SMBs</title>
+    <meta name="description" content="India's only Voice AI platform with Tamil dialects, emotion detection, and built-in CRM. Auto-dialer, AI assistants, Razorpay billing. Trusted by 500+ businesses." />
+    <meta name="keywords" content="voice ai, ai dialer, auto dialer india, crm, tamil voice ai, marketing automation, voice bot, ai sales assistant, voiceflow" />
+    <meta name="author" content="VoiceFlow AI" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph / Social sharing -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="VoiceFlow AI — Voice Marketing Platform for Indian SMBs" />
+    <meta property="og:description" content="AI-powered voice calls with Tamil dialect support, emotion detection, and CRM. 10× your outbound sales today." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:url" content="https://voiceflow.ai" />
+    <meta property="og:site_name" content="VoiceFlow AI" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="VoiceFlow AI — India's Voice AI Platform" />
+    <meta name="twitter:description" content="AI-powered auto-dialer, Tamil dialects, emotion detection, and CRM built-in. Start in 60 seconds." />
+    <meta name="twitter:image" content="/og-image.png" />
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://voiceflow.ai" />
+
+    <!-- Theme color for mobile browsers -->
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="VoiceFlow AI" />
+
+    <!-- Structured data (SaaS product) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "VoiceFlow AI",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "AI-powered voice marketing platform for Indian SMBs with Tamil dialect support, emotion detection, and CRM.",
+      "offers": {
+        "@type": "Offer",
+        "price": "4999",
+        "priceCurrency": "INR"
+      }
+    }
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <script>
+      // Apply dark mode before React mounts to prevent flash
+      try {
+        var stored = localStorage.getItem('voiceflow_dark_mode');
+        if (stored === 'true' || (stored === null && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch(e) {}
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

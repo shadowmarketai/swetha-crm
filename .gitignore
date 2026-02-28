@@ -1,0 +1,120 @@
+# ============================================
+# VoiceFlow Marketing AI - .gitignore
+# Combined Python + Node.js
+# ============================================
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# Type checking / mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# ----- Node.js -----
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+.npm
+.eslintcache
+
+# ----- Environment & Secrets -----
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ----- IDE -----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ----- Testing -----
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+
+# ----- Data, Models, Logs -----
+data/
+models/
+logs/
+*.wav
+*.mp3
+*.ogg
+*.m4a
+*.flac
+
+# ----- Database -----
+*.db
+*.sqlite3
+
+# ----- Docker -----
+.docker/
+
+# ----- Jupyter -----
+.ipynb_checkpoints/
+
+# ----- OS -----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ----- Temporary -----
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~
+
+# ----- Celery -----
+celerybeat-schedule
+celerybeat.pid

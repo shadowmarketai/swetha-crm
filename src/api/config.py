@@ -1,0 +1,97 @@
+"""
+VoiceFlow Marketing AI - Application Configuration
+====================================================
+Centralized settings using pydantic-settings.
+All values can be overridden via environment variables or .env file.
+"""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables and .env file."""
+
+    # ── Application ──────────────────────────────────────────────
+    APP_NAME: str = "VoiceFlow Marketing AI"
+    APP_VERSION: str = "1.0.0"
+    APP_ENV: str = "development"
+    DEBUG: bool = True
+
+    # ── Database ─────────────────────────────────────────────────
+    DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/voiceflow"
+
+    # ── Redis ────────────────────────────────────────────────────
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # ── Authentication ───────────────────────────────────────────
+    SECRET_KEY: str = "voiceflow-secret-key-change-in-production-2024"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # ── CORS (KB-016) ───────────────────────────────────────────
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ]
+
+    # ── Voice AI ─────────────────────────────────────────────────
+    WHISPER_MODEL: str = "base"
+    TORCH_DEVICE: str = "cpu"
+
+    # ── LLM Providers ───────────────────────────────────────────
+    ANTHROPIC_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+
+    # ── CRM Integrations ────────────────────────────────────────
+    ZOHO_CLIENT_ID: str = ""
+    ZOHO_CLIENT_SECRET: str = ""
+    HUBSPOT_API_KEY: str = ""
+
+    # ── Marketing Integrations ──────────────────────────────────
+    META_APP_ID: str = ""
+    META_APP_SECRET: str = ""
+    META_PAGE_ACCESS_TOKEN: str = ""
+    META_WEBHOOK_VERIFY_TOKEN: str = "voiceflow-fb-verify-2024"
+    GOOGLE_ADS_DEVELOPER_TOKEN: str = ""
+
+    # ── Lead Source Integrations ──────────────────────────────
+    INDIAMART_CRM_API_URL: str = "https://mapi.indiamart.com/wservce/crm/crmListing/v2/"
+    JUSTDIAL_WEBHOOK_SECRET: str = ""
+
+    # ── Messaging ────────────────────────────────────────────────
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    WHATSAPP_API_KEY: str = ""
+
+    # ── Telephony ────────────────────────────────────────────────
+    TELECMI_API_KEY: str = ""
+    EXOTEL_API_KEY: str = ""
+
+    # ── Payments ─────────────────────────────────────────────────
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+
+    # ── Monitoring ───────────────────────────────────────────────
+    SENTRY_DSN: str = ""
+
+    # ── Workflow ─────────────────────────────────────────────────
+    N8N_WEBHOOK_URL: str = "http://localhost:5678"
+
+    # ── Rate Limiting ────────────────────────────────────────────
+    RATE_LIMIT_LOGIN: str = "5/minute"
+    RATE_LIMIT_REGISTER: str = "3/minute"
+    RATE_LIMIT_DEFAULT: str = "60/minute"
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=True,
+    )
+
+
+# Singleton instance
+settings = Settings()
