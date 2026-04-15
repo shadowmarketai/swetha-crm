@@ -35,9 +35,12 @@ def _extract_plan_from_token(request: Request) -> str:
     if not auth.startswith("Bearer "):
         return DEFAULT_PLAN
     token = auth[7:]
-    # Demo token
+    # Demo token — only in DEMO_MODE
     if token == "demo-token-123":
-        return "pro"
+        import os
+        if os.getenv("DEMO_MODE", "").lower() in ("true", "1", "yes"):
+            return "pro"
+        return DEFAULT_PLAN
     # Decode JWT payload without verification (just for plan lookup)
     try:
         import base64
@@ -129,8 +132,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "script-src 'self' https://checkout.razorpay.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "  # unsafe-inline needed for Tailwind runtime styles
                 "font-src 'self' https://fonts.gstatic.com; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self' https://api.razorpay.com https://*.groq.com https://api.anthropic.com; "

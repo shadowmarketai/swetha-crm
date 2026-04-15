@@ -103,18 +103,11 @@ def _reply_to_dict(reply: TicketReply) -> dict:
     }
 
 
-def _get_user_id(current_user: dict) -> int:
-    """Extract a numeric user_id from the current_user dict.
-    Legacy users have string IDs; we hash them to produce a stable int.
+def _get_user_id(current_user: dict) -> str:
+    """Extract user_id as a string from the current_user dict.
+    Matches legacy users.id (TEXT) column used across CRM tables.
     """
-    raw = current_user.get("id", "")
-    if isinstance(raw, int):
-        return raw
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        # Deterministic int from string ID for legacy users
-        return abs(hash(raw)) % (2**31)
+    return str(current_user.get("id", ""))
 
 
 # ── GET /tickets ────────────────────────────────────────────────
@@ -235,7 +228,16 @@ async def create_ticket(
     db.refresh(ticket)
 
     logger.info("Ticket created: %s (user=%s)", ticket.ticket_number, uid)
-    return TicketResponse(**_ticket_to_dict(ticket))
+
+    payload = _ticket_to_dict(ticket)
+    # Real-time broadcast to the tenant (so all their agents see it live)
+    try:
+        from api.realtime import manager
+        await manager.to_user(str(uid), "helpdesk.ticket.created", payload)
+    except Exception as exc:
+        logger.warning("WS broadcast (helpdesk.ticket.created) failed: %s", exc)
+
+    return TicketResponse(**payload)
 
 
 # ── GET /tickets/{ticket_id} ───────────────────────────────────
@@ -324,7 +326,15 @@ async def update_ticket(
     db.refresh(ticket)
 
     logger.info("Ticket updated: %s (user=%s)", ticket.ticket_number, uid)
-    return TicketResponse(**_ticket_to_dict(ticket))
+
+    payload = _ticket_to_dict(ticket)
+    try:
+        from api.realtime import manager
+        await manager.to_user(str(uid), "helpdesk.ticket.updated", payload)
+    except Exception as exc:
+        logger.warning("WS broadcast (helpdesk.ticket.updated) failed: %s", exc)
+
+    return TicketResponse(**payload)
 
 
 # ── POST /tickets/{ticket_id}/reply ─────────────────────────────
@@ -383,6 +393,15 @@ async def add_reply(
     db.refresh(reply)
 
     logger.info("Reply added to ticket %s (user=%s)", ticket.ticket_number, uid)
+
+    payload = _reply_to_dict(reply)
+    payload["ticket_id"] = ticket_id
+    try:
+        from api.realtime import manager
+        await manager.to_user(str(uid), "helpdesk.ticket.reply", payload)
+    except Exception as exc:
+        logger.warning("WS broadcast (helpdesk.ticket.reply) failed: %s", exc)
+
     return TicketReplyResponse(**_reply_to_dict(reply))
 
 
@@ -435,7 +454,15 @@ async def resolve_ticket(
     db.refresh(ticket)
 
     logger.info("Ticket resolved: %s (user=%s)", ticket.ticket_number, uid)
-    return TicketResponse(**_ticket_to_dict(ticket))
+
+    payload = _ticket_to_dict(ticket)
+    try:
+        from api.realtime import manager
+        await manager.to_user(str(uid), "helpdesk.ticket.resolved", payload)
+    except Exception as exc:
+        logger.warning("WS broadcast (helpdesk.ticket.resolved) failed: %s", exc)
+
+    return TicketResponse(**payload)
 
 
 # ── GET /dashboard ──────────────────────────────────────────────

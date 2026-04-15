@@ -70,17 +70,45 @@ class TokenResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TenantBranding(BaseModel):
+    """Tenant branding info exposed to its own users (read-only)."""
+
+    id: str
+    name: str
+    slug: Optional[str] = None
+    app_name: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_url: Optional[str] = None
+    favicon_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    font_family: Optional[str] = None
+    sidebar_style: Optional[str] = None
+    website: Optional[str] = None
+    support_email: Optional[str] = None
+    support_phone: Optional[str] = None
+    address: Optional[str] = None
+    plan_id: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class UserResponse(BaseModel):
     """Public user profile response."""
 
     id: str
     email: str
     full_name: str
+    name: Optional[str] = None  # alias used by some frontend code
     role: str = "user"
     company: Optional[str] = None
     phone: Optional[str] = None
     plan: str = "starter"
     is_active: bool = True
+    is_super_admin: bool = False
+    tenant_id: Optional[str] = None
+    tenant: Optional[TenantBranding] = None
     created_at: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -11,8 +11,10 @@ KB-007: Include logout endpoint
 
 import logging
 import os
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -22,6 +24,7 @@ from api.schemas.auth import (
     RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
+    TenantBranding,
     UserResponse,
     UserUpdate,
 )
@@ -111,13 +114,22 @@ async def refresh_token(body: RefreshTokenRequest) -> TokenResponse:
 )
 async def logout(
     current_user: dict = Depends(get_current_user),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
 ) -> MessageResponse:
-    """Logout the current user (KB-007).
-
-    Client should discard tokens. In production, the token would be
-    added to a Redis blacklist.
-    """
-    result = AuthService.logout(user_id=current_user.get("id", ""))
+    """Logout the current user — revokes the JWT so it cannot be reused."""
+    # Extract jti from the token to revoke it
+    token_jti = None
+    if credentials:
+        try:
+            import jwt as _jwt
+            payload = _jwt.decode(
+                credentials.credentials,
+                options={"verify_signature": False},
+            )
+            token_jti = payload.get("jti")
+        except Exception:
+            pass
+    result = AuthService.logout(user_id=current_user.get("id", ""), token_jti=token_jti)
     return MessageResponse(**result)
 
 
@@ -132,18 +144,61 @@ async def logout(
 async def get_profile(
     current_user: dict = Depends(get_current_active_user),
 ) -> UserResponse:
-    """Get the authenticated user's profile."""
+    """Get the authenticated user's profile and tenant branding."""
+    tenant_branding = _load_tenant_branding(current_user.get("tenant_id"))
     return UserResponse(
         id=current_user.get("id", ""),
         email=current_user.get("email", ""),
         full_name=current_user.get("name", ""),
+        name=current_user.get("name", ""),
         role=current_user.get("role", "user"),
         company=current_user.get("company"),
         phone=current_user.get("phone"),
         plan=current_user.get("plan", "starter"),
         is_active=bool(current_user.get("is_active", 1)),
+        is_super_admin=bool(current_user.get("is_super_admin", 0)),
+        tenant_id=current_user.get("tenant_id"),
+        tenant=tenant_branding,
         created_at=current_user.get("created_at", ""),
     )
+
+
+def _load_tenant_branding(tenant_id: str | None) -> TenantBranding | None:
+    """Load tenant branding fields. Returns None if no tenant."""
+    if not tenant_id:
+        return None
+    from api.database import db, USE_POSTGRES
+    _ph = "%s" if USE_POSTGRES else "?"
+    try:
+        with db() as conn:
+            row = conn.execute(
+                f"SELECT * FROM platform_tenants WHERE id={_ph}", (tenant_id,)
+            ).fetchone()
+            if not row:
+                return None
+            t = dict(row)
+            return TenantBranding(
+                id=t["id"],
+                name=t.get("name", ""),
+                slug=t.get("slug"),
+                app_name=t.get("app_name"),
+                tagline=t.get("tagline"),
+                logo_url=t.get("logo_url"),
+                favicon_url=t.get("favicon_url"),
+                primary_color=t.get("primary_color"),
+                secondary_color=t.get("secondary_color"),
+                accent_color=t.get("accent_color"),
+                font_family=t.get("font_family"),
+                sidebar_style=t.get("sidebar_style"),
+                website=t.get("website"),
+                support_email=t.get("support_email"),
+                support_phone=t.get("support_phone"),
+                address=t.get("address"),
+                plan_id=t.get("plan_id"),
+            )
+    except Exception as exc:
+        logger.warning("Failed to load tenant branding for %s: %s", tenant_id, exc)
+        return None
 
 
 # ── PUT /me ──────────────────────────────────────────────────────

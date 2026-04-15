@@ -68,10 +68,16 @@ class IndicF5Engine(BaseTTSEngine):
                 return True
 
             except ImportError:
-                logger.warning("f5-tts not installed, using edge-tts fallback")
-                self.is_loaded = True
-                self._fallback_mode = True
-                return True
+                logger.warning("f5-tts not installed, checking edge-tts fallback")
+                try:
+                    import edge_tts  # noqa: F401
+                    self.is_loaded = True
+                    self._fallback_mode = True
+                    logger.info("IndicF5 using edge-tts fallback")
+                    return True
+                except ImportError:
+                    logger.error("Neither f5-tts nor edge-tts installed — IndicF5 unavailable")
+                    return False
 
         except Exception as e:
             logger.error("Failed to load IndicF5: %s", e)

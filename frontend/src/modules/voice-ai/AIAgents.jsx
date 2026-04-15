@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '../../hooks/usePermissions';
+import { assistantsAPI } from '../../services/api';
 import {
   Bot, Plus, LayoutGrid, Columns, X, Settings, Power, Trash2,
   Phone, CheckCircle, Clock, Globe, Sparkles, Brain, Smile,
@@ -273,6 +274,36 @@ export default function AIAgentsPage() {
   const canDelete = can('voiceAI', 'delete');
   const [agents, setAgents] = useState(initialAgents);
   const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'grid'
+
+  // Load agents from API on mount
+  useEffect(() => {
+    let cancelled = false;
+    assistantsAPI.getAll()
+      .then(({ data }) => {
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
+        const mapped = data.map(a => ({
+          id: a.id,
+          name: a.name || a.assistant_name || 'Agent',
+          description: a.description || a.system_prompt?.slice(0, 80) || '',
+          status: a.is_active ? 'active' : 'inactive',
+          voice: a.voice || a.tts_voice || 'Default',
+          personality: a.personality || 'Professional',
+          totalCalls: a.total_calls || 0,
+          successRate: a.success_rate || 0,
+          avgDuration: a.avg_duration || '0:00',
+          languages: a.languages || ['Tamil'],
+          dialects: a.dialects || [{ dialect: 'Chennai', confidence: 0.8 }],
+          emotionRules: a.emotion_rules || [],
+          genZMode: a.genz_mode || false,
+          genZScore: a.genz_score || 0,
+          genZTerms: a.genz_terms || [],
+          createdAt: a.created_at ? new Date(a.created_at).toISOString().split('T')[0] : '',
+        }));
+        setAgents(prev => [...mapped, ...prev.filter(p => !mapped.find(m => m.id === p.id))]);
+      })
+      .catch(() => {}); // keep mock data
+    return () => { cancelled = true; };
+  }, []);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

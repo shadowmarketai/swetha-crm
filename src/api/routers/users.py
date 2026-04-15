@@ -233,8 +233,9 @@ async def invite_user(
             # Generate a temporary password
             temp_password = secrets.token_urlsafe(12)
 
-            from passlib.hash import sha256_crypt
-            hashed = sha256_crypt.hash(temp_password)
+            from passlib.context import CryptContext
+            _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+            hashed = _pwd.hash(temp_password)
 
             conn.execute(
                 "INSERT INTO users (email, hashed_password, full_name, role, company, is_active) "

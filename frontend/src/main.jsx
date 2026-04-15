@@ -1,7 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+import { QueryProvider } from './providers/QueryProvider'
 import { AuthProvider } from './contexts/AuthContext'
+import { RealtimeProvider } from './contexts/RealtimeContext'
 import App from './App'
 import './styles/globals.css'
 
@@ -14,10 +16,14 @@ if ('serviceWorker' in navigator) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </BrowserRouter>
+    <QueryProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <RealtimeProvider>
+            <App />
+          </RealtimeProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryProvider>
   </React.StrictMode>,
 )

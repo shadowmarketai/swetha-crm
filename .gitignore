@@ -118,3 +118,8 @@ temp/
 # ----- Celery -----
 celerybeat-schedule
 celerybeat.pid
+
+# Database
+*.db
+*.db-shm
+*.db-wal

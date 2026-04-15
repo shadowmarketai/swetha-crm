@@ -1,6 +1,6 @@
 """
-VoiceFlow Marketing AI - Permission System
-============================================
+Swetha Structures CRM - Permission System
+===========================================
 Module-level + action-level RBAC with a centralized permission matrix.
 
 Roles: admin, manager, agent, user, viewer
@@ -25,14 +25,12 @@ PERMISSION_MATRIX: dict[str, dict[str, set[str]]] = {
     "admin": {
         "crm": {"create", "read", "update", "delete"},
         "voiceAI": {"create", "read", "update", "delete"},
-        "marketing": {"create", "read", "update", "delete"},
         "campaigns": {"create", "read", "update", "delete"},
         "analytics": {"create", "read", "update", "delete"},
         "helpdesk": {"create", "read", "update", "delete"},
         "surveys": {"create", "read", "update", "delete"},
         "billing": {"create", "read", "update", "delete"},
         "tenants": {"create", "read", "update", "delete"},
-        "whiteLabel": {"create", "read", "update", "delete"},
         "userManagement": {"create", "read", "update", "delete"},
         "settings": {"create", "read", "update", "delete"},
         "appointments": {"create", "read", "update", "delete"},
@@ -40,18 +38,17 @@ PERMISSION_MATRIX: dict[str, dict[str, set[str]]] = {
         "inbox": {"create", "read", "update", "delete"},
         "webhooks": {"create", "read", "update", "delete"},
         "integrations": {"create", "read", "update", "delete"},
+        "quotation": {"create", "read", "update", "delete"},
     },
     "manager": {
         "crm": {"create", "read", "update", "delete"},
         "voiceAI": {"create", "read", "update", "delete"},
-        "marketing": {"create", "read", "update"},
         "campaigns": {"create", "read", "update", "delete"},
         "analytics": {"read"},
         "helpdesk": {"create", "read", "update"},
         "surveys": {"create", "read", "update", "delete"},
         "billing": set(),
         "tenants": set(),
-        "whiteLabel": set(),
         "userManagement": {"read"},
         "settings": {"read", "update"},
         "appointments": {"create", "read", "update", "delete"},
@@ -59,18 +56,17 @@ PERMISSION_MATRIX: dict[str, dict[str, set[str]]] = {
         "inbox": {"create", "read", "update"},
         "webhooks": {"create", "read", "update"},
         "integrations": {"create", "read", "update"},
+        "quotation": {"create", "read", "update", "delete"},
     },
     "agent": {
         "crm": {"create", "read", "update"},
         "voiceAI": {"create", "read", "update"},
-        "marketing": set(),
         "campaigns": set(),
         "analytics": {"read"},
         "helpdesk": {"create", "read", "update"},
         "surveys": set(),
         "billing": set(),
         "tenants": set(),
-        "whiteLabel": set(),
         "userManagement": set(),
         "settings": {"read"},
         "appointments": {"create", "read", "update"},
@@ -78,18 +74,17 @@ PERMISSION_MATRIX: dict[str, dict[str, set[str]]] = {
         "inbox": {"create", "read", "update"},
         "webhooks": set(),
         "integrations": {"read"},
+        "quotation": {"create", "read", "update"},
     },
     "user": {
         "crm": {"read"},
         "voiceAI": {"read"},
-        "marketing": set(),
         "campaigns": set(),
         "analytics": {"read"},
         "helpdesk": {"create", "read", "update"},
         "surveys": set(),
         "billing": set(),
         "tenants": set(),
-        "whiteLabel": set(),
         "userManagement": set(),
         "settings": {"read"},
         "appointments": {"read"},
@@ -97,18 +92,17 @@ PERMISSION_MATRIX: dict[str, dict[str, set[str]]] = {
         "inbox": {"read"},
         "webhooks": set(),
         "integrations": set(),
+        "quotation": {"read"},
     },
     "viewer": {
         "crm": {"read"},
         "voiceAI": {"read"},
-        "marketing": {"read"},
         "campaigns": {"read"},
         "analytics": {"read"},
         "helpdesk": set(),
         "surveys": set(),
         "billing": set(),
         "tenants": set(),
-        "whiteLabel": set(),
         "userManagement": set(),
         "settings": {"read"},
         "appointments": {"read"},
@@ -116,6 +110,7 @@ PERMISSION_MATRIX: dict[str, dict[str, set[str]]] = {
         "inbox": set(),
         "webhooks": set(),
         "integrations": set(),
+        "quotation": {"read"},
     },
 }
 

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import toast from 'react-hot-toast';
 
 // Base API configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -12,21 +13,50 @@ const api = axios.create({
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('voiceflow_token');
+  const token = localStorage.getItem('swetha_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
-// Handle response errors
+// Handle response errors with user-facing toasts
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('voiceflow_token');
+    const url = error.config?.url || '';
+    const isAuthCall = url.includes('/auth/login') || url.includes('/auth/register');
+    const isSilent = error.config?._silent;
+
+    if (error.response?.status === 401 && !isAuthCall) {
+      localStorage.removeItem('swetha_token');
+      localStorage.removeItem('swetha_user');
       window.location.href = '/login';
+      return Promise.reject(error);
     }
+
+    // Show toast for server errors unless caller opted out with _silent
+    if (!isSilent && !isAuthCall && error.response) {
+      const status = error.response.status;
+      const msg = error.response.data?.detail
+        || error.response.data?.message
+        || error.response.data?.error;
+      if (status === 403) {
+        toast.error(msg || 'You don\u2019t have permission for this action');
+      } else if (status === 404) {
+        // skip — callers handle 404 contextually
+      } else if (status === 422) {
+        toast.error(msg || 'Validation error — check your input');
+      } else if (status >= 500) {
+        toast.error(msg || 'Server error — please try again later');
+      }
+    }
+
+    // Network error (no response at all)
+    if (!isSilent && !error.response && error.code !== 'ERR_CANCELED') {
+      toast.error('Network error — check your connection');
+    }
+
     return Promise.reject(error);
   }
 );
@@ -174,14 +204,16 @@ export const campaignsAPI = {
 // SURVEYS API
 // ============================================
 export const surveysAPI = {
-  // Get all surveys
-  getAll: () => api.get('/api/v1/surveys'),
-  
+  // NOTE: trailing slash is REQUIRED on the collection routes — without it,
+  // the legacy `/api/v1/surveys` router (which expects `name` instead of `title`)
+  // intercepts the request and returns a 422.
+  getAll: () => api.get('/api/v1/surveys/'),
+
   // Get single survey
   getById: (id) => api.get(`/api/v1/surveys/${id}`),
-  
+
   // Create survey
-  create: (data) => api.post('/api/v1/surveys', data),
+  create: (data) => api.post('/api/v1/surveys/', data),
   
   // Update survey
   update: (id, data) => api.put(`/api/v1/surveys/${id}`, data),
@@ -197,35 +229,50 @@ export const surveysAPI = {
   
   // Get shareable link
   getShareLink: (id) => api.get(`/api/v1/surveys/${id}/share`),
+
+  // Publish a draft/paused survey (status → active)
+  publish: (id) => api.post(`/api/v1/surveys/${id}/publish`),
+
+  // ── Public (unauthenticated) endpoints used by the share link page.
+  //    Use raw axios so the 401-redirect interceptor never fires for anonymous users.
+  getPublicBySlug: (slug) =>
+    axios.get(`${API_BASE_URL}/api/v1/public/surveys/${slug}`),
+  submitPublicResponse: (slug, data) =>
+    axios.post(`${API_BASE_URL}/api/v1/public/surveys/${slug}/responses`, data),
 };
 
 // ============================================
 // HELP DESK (TICKETS) API
 // ============================================
+// Backend prefix is /api/v1/helpdesk (helpdesk.py router)
 export const ticketsAPI = {
-  // Get all tickets
-  getAll: (params) => api.get('/api/v1/tickets', { params }),
-  
-  // Get single ticket
-  getById: (id) => api.get(`/api/v1/tickets/${id}`),
-  
+  // Paginated list with filters: { page, page_size, status, priority, category, assigned_to, search }
+  getAll: (params) => api.get('/api/v1/helpdesk/tickets', { params }),
+
+  // Single ticket with replies thread
+  getById: (id) => api.get(`/api/v1/helpdesk/tickets/${id}`),
+
   // Create ticket
-  create: (data) => api.post('/api/v1/tickets', data),
-  
-  // Update ticket
-  update: (id, data) => api.put(`/api/v1/tickets/${id}`, data),
-  
-  // Assign ticket
-  assign: (id, agentId) => api.post(`/api/v1/tickets/${id}/assign`, { agent_id: agentId }),
-  
-  // Change status
-  updateStatus: (id, status) => api.patch(`/api/v1/tickets/${id}/status`, { status }),
-  
-  // Add comment
-  addComment: (id, comment) => api.post(`/api/v1/tickets/${id}/comments`, { comment }),
-  
-  // Get ticket stats
-  getStats: () => api.get('/api/v1/tickets/stats'),
+  create: (data) => api.post('/api/v1/helpdesk/tickets', data),
+
+  // Update ticket (status, priority, category, assignee, internal_notes…)
+  update: (id, data) => api.put(`/api/v1/helpdesk/tickets/${id}`, data),
+
+  // Reply (public message or internal note)
+  // body: { body, is_internal, sender_type: 'agent' | 'customer', sender_name?, sender_email?, attachments? }
+  addReply: (id, body) => api.post(`/api/v1/helpdesk/tickets/${id}/reply`, body),
+
+  // Mark resolved
+  resolve: (id, resolution_notes) =>
+    api.post(`/api/v1/helpdesk/tickets/${id}/resolve`, null, { params: { resolution_notes } }),
+
+  // Dashboard stats
+  getDashboard: () => api.get('/api/v1/helpdesk/dashboard'),
+
+  // ── Convenience helpers (compose into update) ──
+  updateStatus: (id, status) => api.put(`/api/v1/helpdesk/tickets/${id}`, { status }),
+  updatePriority: (id, priority) => api.put(`/api/v1/helpdesk/tickets/${id}`, { priority }),
+  assign: (id, agentId) => api.put(`/api/v1/helpdesk/tickets/${id}`, { assigned_to: agentId }),
 };
 
 // ============================================
@@ -258,32 +305,26 @@ export const analyticsAPI = {
 // TTS / VOICE STUDIO API
 // ============================================
 export const ttsAPI = {
-  // Synthesize text to speech
-  synthesize: (data) => api.post('/api/v1/tts/synthesize', data),
+  // Synthesize text to speech (voice router)
+  synthesize: (data) => api.post('/api/v1/voice/synthesize', data),
 
-  // Stream synthesis (returns audio/wav)
-  synthesizeStream: (data) => api.post('/api/v1/tts/synthesize/stream', data, { responseType: 'blob' }),
+  // List built-in TTS voices
+  listVoices: (language) => api.get('/api/v1/voice/voices', { params: { language } }),
 
-  // Clone a voice from uploaded audio
-  cloneVoice: (data) => api.post('/api/v1/tts/voices/clone', data),
-
-  // List cloned voices
-  listVoices: () => api.get('/api/v1/tts/voices'),
+  // Clone a voice (voice agent router)
+  cloneVoice: (formData) => api.post('/api/v1/agent/voices/clone', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
 
   // Delete a cloned voice
-  deleteVoice: (voiceId) => api.delete(`/api/v1/tts/voices/${voiceId}`),
+  deleteVoice: (voiceId) => api.delete(`/api/v1/agent/voices/${voiceId}`),
 
-  // List available engines
-  listEngines: () => api.get('/api/v1/tts/engines'),
+  // Test a cloned voice
+  testVoice: (voiceId, text) => api.post(`/api/v1/agent/voices/${voiceId}/test`, { text }),
 
-  // Get supported languages
-  listLanguages: () => api.get('/api/v1/tts/languages'),
-
-  // Get supported emotions
-  listEmotions: () => api.get('/api/v1/tts/emotions'),
-
-  // Health check
-  health: () => api.get('/api/v1/tts/health'),
+  // List cloned voices
+  listClonedVoices: (tenantId = 'default') =>
+    api.get('/api/v1/agent/voices', { params: { tenant_id: tenantId } }),
 };
 
 // ============================================
@@ -345,40 +386,77 @@ export const settingsAPI = {
 };
 
 // ============================================
-// WHITE LABEL API (for agencies)
+// AI QUOTATION API
 // ============================================
-export const whiteLabelAPI = {
-  // Get white label settings
-  getSettings: () => api.get('/api/v1/whitelabel'),
-  
-  // Update white label settings
-  updateSettings: (data) => api.put('/api/v1/whitelabel', data),
-  
-  // Get sub-accounts
-  getSubAccounts: () => api.get('/api/v1/whitelabel/accounts'),
-  
-  // Create sub-account
-  createSubAccount: (data) => api.post('/api/v1/whitelabel/accounts', data),
-  
-  // Update sub-account (activate/deactivate)
-  updateAccount: (id, data) => api.put(`/api/v1/whitelabel/accounts/${id}`, data),
-
-  // Update branding
-  updateBranding: (data) => api.put('/api/v1/whitelabel/branding', data),
-
-  // Get commission stats
-  getCommissions: () => api.get('/api/v1/whitelabel/commissions'),
+export const aiQuoteAPI = {
+  voiceToQuote: (text, autoCalc = true) => api.post('/api/v1/ai-quote/voice', { text, auto_calculate: autoCalc }),
+  photoToQuote: (file, context = '') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('context', context);
+    formData.append('auto_calculate', 'true');
+    return api.post('/api/v1/ai-quote/photo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  getRates: (weeksAhead = 2) => api.get('/api/v1/ai-quote/rates', { params: { weeks_ahead: weeksAhead } }),
+  getMarketPosition: (totalAmount, floorArea) => api.post('/api/v1/ai-quote/market', { total_amount: totalAmount, floor_area: floorArea }),
 };
 
 // ============================================
-// Industry Templates API
+// PEB QUOTATION API
 // ============================================
-export const industryAPI = {
-  getAll: () => api.get('/api/v1/industries'),
-  get: (id) => api.get(`/api/v1/industries/${id}`),
-  apply: (id) => api.post(`/api/v1/industries/${id}/apply`),
-  getLeadFields: (id) => api.get(`/api/v1/industries/${id}/lead-fields`),
-  getPipeline: (id) => api.get(`/api/v1/industries/${id}/pipeline`),
+export const quotationAPI = {
+  calculate: (data) => api.post('/api/v1/quotations/calculate', data),
+  create: (data) => api.post('/api/v1/quotations', data),
+  getAll: (params) => api.get('/api/v1/quotations', { params }),
+  get: (id) => api.get(`/api/v1/quotations/${id}`),
+  update: (id, data) => api.put(`/api/v1/quotations/${id}`, data),
+  delete: (id) => api.delete(`/api/v1/quotations/${id}`),
+  generatePdf: (id) => api.post(`/api/v1/quotations/${id}/pdf`, {}, { responseType: 'blob' }),
+  downloadPdf: (id) => api.get(`/api/v1/quotations/${id}/pdf`, { responseType: 'blob' }),
+  revise: (id) => api.post(`/api/v1/quotations/${id}/revise`),
+  changeStatus: (id, status) => api.patch(`/api/v1/quotations/${id}/status`, { status }),
+  getLogs: (id) => api.get(`/api/v1/quotations/${id}/logs`),
+  getStats: () => api.get('/api/v1/quotations/stats'),
+  getByLead: (leadId) => api.get(`/api/v1/quotations/by-lead/${leadId}`),
+};
+
+// ============================================
+// TENDENT QUOTATION ENGINE (templates, intake, portal, offers)
+// ============================================
+export const quotationTemplateAPI = {
+  list: (params) => api.get('/api/v1/quotation-templates', { params }),
+  get: (id) => api.get(`/api/v1/quotation-templates/${id}`),
+  create: (data) => api.post('/api/v1/quotation-templates', data),
+  update: (id, data) => api.put(`/api/v1/quotation-templates/${id}`, data),
+  delete: (id) => api.delete(`/api/v1/quotation-templates/${id}`),
+  calc: (templateId, formData) =>
+    api.post('/api/v1/quotation-templates/calc', { template_id: templateId, form_data: formData }),
+  generateToken: (quotationId, expiresInDays = 30) =>
+    api.post(`/api/v1/quotation-templates/tokens/${quotationId}`, null, { params: { expires_in_days: expiresInDays } }),
+  revokeTokens: (quotationId) =>
+    api.post(`/api/v1/quotation-templates/tokens/${quotationId}/revoke`),
+  listOffers: (quotationId) => api.get(`/api/v1/quotations/${quotationId}/offers`),
+  decideOffer: (quotationId, offerId, action, body = {}) =>
+    api.post(`/api/v1/quotations/${quotationId}/offers/${offerId}/decide`, { action, ...body }),
+};
+
+// ─── Public quotation APIs (no auth) ───
+// Call with `api` but without Authorization header — uses axios instance defaults.
+export const quotationPublicAPI = {
+  getIntakeTemplate: (tenantSlug, templateSlug) =>
+    api.get(`/api/v1/public/intake/${tenantSlug}/${templateSlug}`),
+  submitIntake: (tenantSlug, templateSlug, data) =>
+    api.post(`/api/v1/public/intake/${tenantSlug}/${templateSlug}`, data),
+  viewQuote: (token) => api.get(`/api/v1/public/quote/${token}`),
+  acceptQuote: (token) => api.post(`/api/v1/public/quote/${token}/accept`),
+  rejectQuote: (token) => api.post(`/api/v1/public/quote/${token}/reject`),
+  proposeOffer: (token, proposedAmount, clientMessage) =>
+    api.post(`/api/v1/public/quote/${token}/offer`, {
+      proposed_amount: proposedAmount,
+      client_message: clientMessage,
+    }),
+  askQuestion: (token, message) =>
+    api.post(`/api/v1/public/quote/${token}/ask`, { message }),
 };
 
 // ============================================
@@ -403,6 +481,34 @@ export const emailAPI = {
   send: (data) => api.post('/api/v1/email/send', data),
   sendCampaign: (data) => api.post('/api/v1/email/campaign', data),
   getTemplates: () => api.get('/api/v1/email/templates'),
+};
+
+// ============================================
+// UNIFIED INBOX API
+// ============================================
+export const inboxAPI = {
+  // Connections
+  listConnections: () => api.get('/api/v1/inbox/connections'),
+  createConnection: (data) => api.post('/api/v1/inbox/connections', data),
+  updateConnection: (id, data) => api.put(`/api/v1/inbox/connections/${id}`, data),
+  deleteConnection: (id) => api.delete(`/api/v1/inbox/connections/${id}`),
+  testConnection: (id) => api.post(`/api/v1/inbox/connections/${id}/test`),
+
+  // Baileys (WhatsApp Web) QR
+  getBaileysQR: (id) => api.get(`/api/v1/inbox/connections/${id}/baileys/qr`),
+
+  // Email IMAP poll
+  pollEmail: (id, limit = 30) =>
+    api.post(`/api/v1/inbox/connections/${id}/email/poll`, null, { params: { limit } }),
+
+  // Conversations + messages
+  listConversations: (params) => api.get('/api/v1/inbox/conversations', { params }),
+  getMessages: (conversationId) =>
+    api.get(`/api/v1/inbox/conversations/${conversationId}/messages`),
+  sendMessage: (conversationId, data) =>
+    api.post(`/api/v1/inbox/conversations/${conversationId}/messages`, data),
+  markRead: (conversationId) =>
+    api.post(`/api/v1/inbox/conversations/${conversationId}/read`),
 };
 
 // ============================================
@@ -480,6 +586,141 @@ export const usersAPI = {
   invite: (data) => api.post('/api/v1/users/invite', data),
   remove: (id) => api.delete(`/api/v1/users/${id}`),
   getPermissions: () => api.get('/api/v1/auth/permissions'),
+};
+
+// ============================================
+// VOICE AGENT API (Cloned Voices, Knowledge, Recordings)
+// ============================================
+export const voiceAgentAPI = {
+  // Voices
+  cloneVoice: (formData) => api.post('/api/v1/agent/voices/clone', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
+  listVoices: (tenantId = 'default', activeOnly = true) =>
+    api.get('/api/v1/agent/voices', { params: { tenant_id: tenantId, active_only: activeOnly } }),
+  getVoice: (voiceId) => api.get(`/api/v1/agent/voices/${voiceId}`),
+  deleteVoice: (voiceId) => api.delete(`/api/v1/agent/voices/${voiceId}`),
+  testVoice: (voiceId, text) => api.post(`/api/v1/agent/voices/${voiceId}/test`, { text }),
+
+  // Knowledge
+  addKnowledge: (payload) => api.post('/api/v1/agent/knowledge', payload),
+  bulkAddKnowledge: (payload) => api.post('/api/v1/agent/knowledge/bulk', payload),
+  listKnowledge: (tenantId = 'default', docType, agentId) =>
+    api.get('/api/v1/agent/knowledge', { params: { tenant_id: tenantId, doc_type: docType, agent_id: agentId } }),
+  updateKnowledge: (docId, updates) => api.put(`/api/v1/agent/knowledge/${docId}`, updates),
+  deleteKnowledge: (docId) => api.delete(`/api/v1/agent/knowledge/${docId}`),
+
+  // Recordings
+  listRecordings: (tenantId, limit = 50) =>
+    api.get('/api/v1/agent/recordings', { params: { tenant_id: tenantId, limit } }),
+  getRecordingStats: (tenantId) =>
+    api.get('/api/v1/agent/recordings/stats', { params: { tenant_id: tenantId } }),
+  getRecording: (recordingId) => api.get(`/api/v1/agent/recordings/${recordingId}`),
+  getRecordingAudio: (recordingId) =>
+    api.get(`/api/v1/agent/recordings/${recordingId}/audio`, { responseType: 'blob' }),
+  analyzeRecording: (recordingId) => api.post(`/api/v1/agent/recordings/${recordingId}/analyze`),
+};
+
+// ============================================
+// SUPER ADMIN API (platform console)
+// ============================================
+// All endpoints require is_super_admin = true on the backend.
+// 403 if a tenant user calls these.
+export const superAdminAPI = {
+  // Platform stats
+  getStats: () => api.get('/api/v1/admin/stats'),
+
+  // Tenants
+  listTenants: () => api.get('/api/v1/admin/tenants'),
+  getTenant: (tenantId) => api.get(`/api/v1/admin/tenants/${tenantId}`),
+  createTenant: (payload) => api.post('/api/v1/admin/tenants', payload),
+  updateTenant: (tenantId, payload) => api.put(`/api/v1/admin/tenants/${tenantId}`, payload),
+  deleteTenant: (tenantId) => api.delete(`/api/v1/admin/tenants/${tenantId}`),
+
+  // Cross-tenant users
+  listUsers: (params = {}) => api.get('/api/v1/admin/users', { params }),
+  getUser: (userId) => api.get(`/api/v1/admin/users/${userId}`),
+  createUser: (payload) => api.post('/api/v1/admin/users', payload),
+  updateUser: (userId, payload) => api.put(`/api/v1/admin/users/${userId}`, payload),
+  resetUserPassword: (userId, newPassword) =>
+    api.post(`/api/v1/admin/users/${userId}/reset-password`, { new_password: newPassword }),
+  activateUser: (userId) => api.post(`/api/v1/admin/users/${userId}/activate`),
+  deactivateUser: (userId) => api.post(`/api/v1/admin/users/${userId}/deactivate`),
+  deleteUser: (userId) => api.delete(`/api/v1/admin/users/${userId}`),
+  moveUserTenant: (userId, tenantId) =>
+    api.post(`/api/v1/admin/users/${userId}/move-tenant`, { tenant_id: tenantId }),
+
+  // System features (catalog)
+  listFeatures: () => api.get('/api/v1/admin/features'),
+
+  // Per-tenant feature toggles
+  getTenantFeatures: (tenantId) => api.get(`/api/v1/admin/tenants/${tenantId}/features`),
+  toggleTenantFeature: (tenantId, featureKey, enabled) =>
+    api.put(`/api/v1/admin/tenants/${tenantId}/features/${featureKey}`, { enabled }),
+
+  // Plans
+  listPlans: () => api.get('/api/v1/admin/plans'),
+
+  // Platform support tickets (super admin inbox)
+  listTickets: (params = {}) => api.get('/api/v1/admin/tickets', { params }),
+  getTicket: (ticketId) => api.get(`/api/v1/admin/tickets/${ticketId}`),
+  updateTicket: (ticketId, payload) => api.put(`/api/v1/admin/tickets/${ticketId}`, payload),
+  replyToTicket: (ticketId, body) => api.post(`/api/v1/admin/tickets/${ticketId}/reply`, { body }),
+  resolveTicket: (ticketId) => api.post(`/api/v1/admin/tickets/${ticketId}/resolve`),
+};
+
+// ============================================
+// PLATFORM SUPPORT API (tenant side)
+// ============================================
+// Used by tenant admins to raise support tickets to the platform team.
+// Super admins should NOT call these — backend returns 403.
+export const platformSupportAPI = {
+  listMyTickets: (params = {}) => api.get('/api/v1/platform-support/tickets', { params }),
+  getMyTicket: (ticketId) => api.get(`/api/v1/platform-support/tickets/${ticketId}`),
+  createTicket: (payload) => api.post('/api/v1/platform-support/tickets', payload),
+  replyToTicket: (ticketId, body) =>
+    api.post(`/api/v1/platform-support/tickets/${ticketId}/reply`, { body }),
+};
+
+// ============================================
+// CRM COMPANIES API
+// ============================================
+export const companiesAPI = {
+  getAll: (params) => api.get('/api/v1/crm-companies', { params }),
+  getById: (id) => api.get(`/api/v1/crm-companies/${id}`),
+  create: (data) => api.post('/api/v1/crm-companies', data),
+  update: (id, data) => api.put(`/api/v1/crm-companies/${id}`, data),
+  delete: (id) => api.delete(`/api/v1/crm-companies/${id}`),
+};
+
+// ============================================
+// CRM CONTACTS API
+// ============================================
+export const contactsAPI = {
+  getAll: (params) => api.get('/api/v1/crm-contacts', { params }),
+  getById: (id) => api.get(`/api/v1/crm-contacts/${id}`),
+  create: (data) => api.post('/api/v1/crm-contacts', data),
+  update: (id, data) => api.put(`/api/v1/crm-contacts/${id}`, data),
+  delete: (id) => api.delete(`/api/v1/crm-contacts/${id}`),
+};
+
+// ============================================
+// CRM DEALS API
+// ============================================
+export const dealsAPI = {
+  getAll: (params) => api.get('/api/v1/crm-deals', { params }),
+  getById: (id) => api.get(`/api/v1/crm-deals/${id}`),
+  create: (data) => api.post('/api/v1/crm-deals', data),
+  update: (id, data) => api.put(`/api/v1/crm-deals/${id}`, data),
+  delete: (id) => api.delete(`/api/v1/crm-deals/${id}`),
+};
+
+// ============================================
+// CRM ACTIVITIES API
+// ============================================
+export const activitiesAPI = {
+  getAll: (params) => api.get('/api/v1/crm-activities', { params }),
+  create: (data) => api.post('/api/v1/crm-activities', data),
 };
 
 export default api;

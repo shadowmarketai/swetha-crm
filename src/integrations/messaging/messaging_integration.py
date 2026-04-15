@@ -676,9 +676,184 @@ class TwilioHandler:
             )
 
 
+class WATIAdapter:
+    """
+    WATI WhatsApp Business API adapter.
+    Tenant configures: api_endpoint, access_token, channel_id (optional).
+    Docs: https://docs.wati.io/reference
+    """
+
+    def __init__(self, api_endpoint: str = "", access_token: str = "", channel_id: str = None, **_):
+        self.api_endpoint = (api_endpoint or "").rstrip("/")
+        self.access_token = access_token or ""
+        self.channel_id = channel_id
+
+    def _headers(self):
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+
+    async def send_text_message(self, to: str, text: str) -> MessageResult:
+        try:
+            url = f"{self.api_endpoint}/api/v1/sendSessionMessage/{to}"
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(url, headers=self._headers(), params={"messageText": text})
+            data = r.json() if r.content else {}
+            return MessageResult(
+                success=r.status_code < 400,
+                platform="wati",
+                message_id=str(data.get("id") or data.get("message_id") or ""),
+                error=None if r.status_code < 400 else r.text[:500],
+                raw_response=data,
+            )
+        except Exception as e:
+            return MessageResult(success=False, platform="wati", error=str(e))
+
+    async def send_document_message(self, to: str, document_url: str, filename: str, caption: str = "") -> MessageResult:
+        try:
+            url = f"{self.api_endpoint}/api/v1/sendSessionFile/{to}"
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(
+                    url,
+                    headers=self._headers(),
+                    params={"caption": caption},
+                    json={"fileUrl": document_url, "filename": filename},
+                )
+            data = r.json() if r.content else {}
+            return MessageResult(
+                success=r.status_code < 400,
+                platform="wati",
+                message_id=str(data.get("id", "")),
+                error=None if r.status_code < 400 else r.text[:500],
+                raw_response=data,
+            )
+        except Exception as e:
+            return MessageResult(success=False, platform="wati", error=str(e))
+
+    async def send_template_message(self, to: str, template_name: str, variables: dict) -> MessageResult:
+        try:
+            url = f"{self.api_endpoint}/api/v1/sendTemplateMessage/{to}"
+            params_list = [{"name": k, "value": str(v)} for k, v in (variables or {}).items()]
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(
+                    url,
+                    headers=self._headers(),
+                    json={"template_name": template_name, "broadcast_name": template_name, "parameters": params_list},
+                )
+            data = r.json() if r.content else {}
+            return MessageResult(
+                success=r.status_code < 400,
+                platform="wati",
+                message_id=str(data.get("id", "")),
+                error=None if r.status_code < 400 else r.text[:500],
+                raw_response=data,
+            )
+        except Exception as e:
+            return MessageResult(success=False, platform="wati", error=str(e))
+
+
+class GupshupAdapter:
+    """
+    Gupshup WhatsApp Business API adapter.
+    Tenant configures: api_key, app_name, source_number.
+    Docs: https://docs.gupshup.io/docs/whatsapp-business-api
+    """
+
+    BASE_URL = "https://api.gupshup.io/sm/api/v1"
+
+    def __init__(self, api_key: str = "", app_name: str = "", source_number: str = "", **_):
+        self.api_key = api_key or ""
+        self.app_name = app_name or ""
+        self.source_number = source_number or ""
+
+    def _headers(self):
+        return {
+            "apikey": self.api_key,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+    async def send_text_message(self, to: str, text: str) -> MessageResult:
+        try:
+            payload = {
+                "channel": "whatsapp",
+                "source": self.source_number,
+                "destination": to,
+                "message": '{"type":"text","text":"%s"}' % text.replace('"', '\\"'),
+                "src.name": self.app_name,
+            }
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(f"{self.BASE_URL}/msg", headers=self._headers(), data=payload)
+            data = r.json() if r.content else {}
+            return MessageResult(
+                success=r.status_code < 400 and data.get("status") != "error",
+                platform="gupshup",
+                message_id=str(data.get("messageId", "")),
+                error=None if r.status_code < 400 else (data.get("message") or r.text[:500]),
+                raw_response=data,
+            )
+        except Exception as e:
+            return MessageResult(success=False, platform="gupshup", error=str(e))
+
+    async def send_document_message(self, to: str, document_url: str, filename: str, caption: str = "") -> MessageResult:
+        try:
+            import json as _json
+            message = {
+                "type": "file",
+                "url": document_url,
+                "filename": filename,
+            }
+            if caption:
+                message["caption"] = caption
+            payload = {
+                "channel": "whatsapp",
+                "source": self.source_number,
+                "destination": to,
+                "message": _json.dumps(message),
+                "src.name": self.app_name,
+            }
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(f"{self.BASE_URL}/msg", headers=self._headers(), data=payload)
+            data = r.json() if r.content else {}
+            return MessageResult(
+                success=r.status_code < 400 and data.get("status") != "error",
+                platform="gupshup",
+                message_id=str(data.get("messageId", "")),
+                error=None if r.status_code < 400 else (data.get("message") or r.text[:500]),
+                raw_response=data,
+            )
+        except Exception as e:
+            return MessageResult(success=False, platform="gupshup", error=str(e))
+
+    async def send_template_message(self, to: str, template_name: str, variables: dict) -> MessageResult:
+        try:
+            import json as _json
+            params_list = [str(v) for v in (variables or {}).values()]
+            template = {"id": template_name, "params": params_list}
+            payload = {
+                "channel": "whatsapp",
+                "source": self.source_number,
+                "destination": to,
+                "template": _json.dumps(template),
+                "src.name": self.app_name,
+            }
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(f"{self.BASE_URL}/template/msg", headers=self._headers(), data=payload)
+            data = r.json() if r.content else {}
+            return MessageResult(
+                success=r.status_code < 400 and data.get("status") != "error",
+                platform="gupshup",
+                message_id=str(data.get("messageId", "")),
+                error=None if r.status_code < 400 else (data.get("message") or r.text[:500]),
+                raw_response=data,
+            )
+        except Exception as e:
+            return MessageResult(success=False, platform="gupshup", error=str(e))
+
+
 class MessagingFactory:
     """Factory for messaging integrations"""
-    
+
     @staticmethod
     def get_handler(platform: str):
         """Get messaging handler by platform"""
@@ -687,11 +862,39 @@ class MessagingFactory:
             "exotel": ExotelIVRHandler,
             "twilio": TwilioHandler
         }
-        
+
         if platform not in handlers:
             raise ValueError(f"Unsupported platform: {platform}")
-        
+
         return handlers[platform]()
+
+    @classmethod
+    def get_whatsapp_adapter(cls, provider: str, credentials: dict):
+        """
+        Return a WhatsApp adapter instance for a tenant's chosen provider.
+        `credentials` is a dict stored on TenantWhatsAppConfig.credentials.
+
+        Supported providers:
+            wati    → WATIAdapter(api_endpoint, access_token, channel_id)
+            twilio  → TwilioHandler  (uses env vars; credentials optional)
+            gupshup → GupshupAdapter(api_key, app_name, source_number)
+            meta    → WhatsAppVoiceHandler (Meta Cloud API; uses env vars)
+            baileys → raise NotImplementedError (requires the baileys-bridge service)
+        """
+        provider = (provider or "meta").lower()
+        credentials = credentials or {}
+
+        if provider == "wati":
+            return WATIAdapter(**credentials)
+        if provider == "gupshup":
+            return GupshupAdapter(**credentials)
+        if provider == "twilio":
+            return TwilioHandler()
+        if provider == "meta":
+            return WhatsAppVoiceHandler()
+        if provider == "baileys":
+            raise NotImplementedError("Baileys requires the separate baileys-bridge service")
+        raise ValueError(f"Unsupported WhatsApp provider: {provider}")
 
 
 # Voice-to-Response pipeline

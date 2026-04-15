@@ -28,7 +28,7 @@ class TicketCreate(BaseModel):
     customer_name: Optional[str] = Field(default=None, max_length=200)
     customer_email: Optional[str] = Field(default=None, max_length=255)
     customer_phone: Optional[str] = Field(default=None, max_length=20)
-    assigned_to: Optional[int] = None
+    assigned_to: Optional[str] = None
     lead_id: Optional[int] = None
     contact_id: Optional[int] = None
     tags: Optional[list[str]] = None
@@ -55,7 +55,7 @@ class TicketUpdate(BaseModel):
         default=None,
         pattern="^(billing|technical|sales|general|feature_request|bug_report|voice_ai|crm|integration|other)$",
     )
-    assigned_to: Optional[int] = None
+    assigned_to: Optional[str] = None
     tags: Optional[list[str]] = None
     custom_fields: Optional[dict[str, Any]] = None
     internal_notes: Optional[str] = None
@@ -93,7 +93,7 @@ class TicketReplyResponse(BaseModel):
     is_ai_generated: bool = False
     ai_confidence: Optional[float] = None
     ticket_id: int
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -131,8 +131,8 @@ class TicketResponse(BaseModel):
     attachments: Optional[list[dict[str, str]]] = None
     lead_id: Optional[int] = None
     contact_id: Optional[int] = None
-    assigned_to: Optional[int] = None
-    user_id: int
+    assigned_to: Optional[str] = None
+    user_id: str
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     replies: Optional[list[TicketReplyResponse]] = None

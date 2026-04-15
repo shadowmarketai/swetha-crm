@@ -15,11 +15,11 @@ const ROLE_COLORS = {
 
 // Mock data for demo mode
 const MOCK_USERS = [
-  { id: 'demo-001', email: 'admin@voiceflow.ai', full_name: 'VoiceFlow Admin', role: 'admin', is_active: true, company: 'ShadowMarket', plan: 'pro', created_at: '2024-01-01' },
-  { id: 'demo-002', email: 'manager@voiceflow.ai', full_name: 'Sales Manager', role: 'manager', is_active: true, company: 'ShadowMarket', plan: 'pro', created_at: '2024-02-15' },
-  { id: 'demo-003', email: 'agent@voiceflow.ai', full_name: 'Support Agent', role: 'agent', is_active: true, company: 'ShadowMarket', plan: 'starter', created_at: '2024-03-20' },
-  { id: 'demo-004', email: 'user@voiceflow.ai', full_name: 'Regular User', role: 'user', is_active: true, company: 'ShadowMarket', plan: 'starter', created_at: '2024-04-10' },
-  { id: 'demo-005', email: 'viewer@voiceflow.ai', full_name: 'Viewer Account', role: 'viewer', is_active: false, company: 'ShadowMarket', plan: 'starter', created_at: '2024-05-05' },
+  { id: 'demo-001', email: 'admin@swetha.in', full_name: 'Swetha Admin', role: 'admin', is_active: true, company: 'Swetha Structures', plan: 'pro', created_at: '2024-01-01' },
+  { id: 'demo-002', email: 'manager@swetha.in', full_name: 'Sales Manager', role: 'manager', is_active: true, company: 'Swetha Structures', plan: 'pro', created_at: '2024-02-15' },
+  { id: 'demo-003', email: 'agent@swetha.in', full_name: 'Support Agent', role: 'agent', is_active: true, company: 'Swetha Structures', plan: 'starter', created_at: '2024-03-20' },
+  { id: 'demo-004', email: 'user@swetha.in', full_name: 'Regular User', role: 'user', is_active: true, company: 'Swetha Structures', plan: 'starter', created_at: '2024-04-10' },
+  { id: 'demo-005', email: 'viewer@swetha.in', full_name: 'Viewer Account', role: 'viewer', is_active: false, company: 'Swetha Structures', plan: 'starter', created_at: '2024-05-05' },
 ];
 
 export default function UserManagement() {
@@ -33,7 +33,7 @@ export default function UserManagement() {
 
   // Try to fetch real users from API
   useEffect(() => {
-    const token = localStorage.getItem('voiceflow_token');
+    const token = localStorage.getItem('swetha_token');
     if (token && token !== 'demo-token-123') {
       fetch('/api/v1/users', {
         headers: { Authorization: `Bearer ${token}` },

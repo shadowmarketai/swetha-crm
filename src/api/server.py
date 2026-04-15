@@ -1,6 +1,6 @@
 """
-VoiceFlow Marketing AI - API Server (Modular)
-===============================================
+Swetha Structures CRM - API Server (Modular)
+==============================================
 Slim app factory that wires routers, middleware, and exception handlers.
 
 All endpoint logic lives in api/routers/ (modular) and external modules.
@@ -10,9 +10,12 @@ Configuration is centralised in api/config.py via pydantic-settings.
 import logging
 import os
 import sys
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -36,40 +39,39 @@ limiter = Limiter(key_func=get_remote_address)
 def create_app() -> FastAPI:
     """Build and return the configured FastAPI application."""
 
+    # Disable API docs in production (OWASP: minimize attack surface)
+    is_prod = settings.APP_ENV == "production"
     application = FastAPI(
         title=settings.APP_NAME,
-        description="Voice AI + CRM + Marketing Automation for Indian SMBs",
+        description="CRM + Automation + PEB Quotation for Swetha Structures",
         version=settings.APP_VERSION,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_url=None if is_prod else "/openapi.json",
     )
 
     # Attach limiter state for slowapi
     application.state.limiter = limiter
     application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # ── CORS (KB-016: use settings.ALLOWED_ORIGINS) ──────────
+    # ── Security Middleware (added BEFORE CORS — inner in LIFO stack) ──
+    from api.middleware import (
+        RateLimitMiddleware,
+        SecurityHeadersMiddleware,
+        RequestSizeLimitMiddleware,
+    )
+    application.add_middleware(RequestSizeLimitMiddleware)
+    application.add_middleware(SecurityHeadersMiddleware)
+    application.add_middleware(RateLimitMiddleware)
+
+    # ── CORS (must be outermost — added LAST in Starlette LIFO) ──
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
     )
-
-    # ── Security Middleware ───────────────────────────────────
-    try:
-        from api.middleware import (
-            RateLimitMiddleware,
-            RequestSizeLimitMiddleware,
-            SecurityHeadersMiddleware,
-        )
-        application.add_middleware(RateLimitMiddleware)
-        application.add_middleware(SecurityHeadersMiddleware)
-        application.add_middleware(RequestSizeLimitMiddleware)
-        logger.info("Security middleware loaded (rate limiting, headers, request size)")
-    except Exception as exc:
-        logger.warning("Security middleware not available: %s", exc)
 
     # ── Exception Handlers ───────────────────────────────────
     register_exception_handlers(application)
@@ -77,27 +79,89 @@ def create_app() -> FastAPI:
     # ── Lifecycle Events ─────────────────────────────────────
     _register_lifecycle(application)
 
-    # ── Root Endpoint ────────────────────────────────────────
-    @application.get("/")
-    async def root():
+    # ── API info endpoint ──────────────────────────────────────
+    @application.get("/api/info")
+    async def api_info():
+        # Only return version info in non-production (reduces attack surface)
+        if is_prod:
+            return {"status": "running"}
         return {
             "name": settings.APP_NAME,
             "version": settings.APP_VERSION,
             "status": "running",
             "features": [
-                "Multi-dialect ASR (Tamil, Hindi)",
-                "Emotion Detection",
-                "Gen Z Slang Understanding",
-                "Marketing Intent Classification",
-                "CRM Integration",
-                "Marketing Automation",
+                "CRM Lead Management",
+                "PEB Quotation System",
+                "Automation & Workflows",
+                "Helpdesk & Surveys",
+                "VoiceFlow AI Integration (via API)",
             ],
         }
 
     # ── Include Routers ──────────────────────────────────────
     _include_routers(application)
 
+    # ── Static Files & SPA Fallback ────────────────────────
+    _mount_frontend(application)
+
     return application
+
+
+# ── Frontend Static Files ────────────────────────────────────────
+
+def _mount_frontend(application: FastAPI) -> None:
+    """Serve the React SPA from /static/ with index.html fallback."""
+    static_dir = Path(__file__).resolve().parent.parent.parent / "static"
+    if not static_dir.exists():
+        logger.info("No static/ directory found — frontend not bundled in this build")
+        # Fallback: return API info at root
+        @application.get("/")
+        async def root_fallback():
+            return {"name": settings.APP_NAME, "version": settings.APP_VERSION, "status": "running"}
+        return
+
+    logger.info("Serving frontend from %s", static_dir)
+
+    # Mount /assets/ for hashed static files (JS/CSS/images)
+    assets_dir = static_dir / "assets"
+    if assets_dir.exists():
+        application.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    # Serve specific static files at root level
+    @application.get("/favicon.svg")
+    @application.get("/favicon.ico")
+    async def favicon(request: Request):
+        for name in ("favicon.svg", "favicon.ico"):
+            p = static_dir / name
+            if p.exists():
+                return FileResponse(str(p))
+        return HTMLResponse("", status_code=404)
+
+    @application.get("/manifest.json")
+    async def manifest():
+        p = static_dir / "manifest.json"
+        if p.exists():
+            return FileResponse(str(p))
+        return HTMLResponse("", status_code=404)
+
+    @application.get("/service-worker.js")
+    async def service_worker():
+        p = static_dir / "service-worker.js"
+        if p.exists():
+            return FileResponse(str(p), media_type="application/javascript")
+        return HTMLResponse("", status_code=404)
+
+    # SPA catch-all: any path not matched by API routes serves index.html
+    index_html = static_dir / "index.html"
+
+    @application.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Try to serve static file first
+        file_path = static_dir / full_path
+        if file_path.is_file() and ".." not in full_path:
+            return FileResponse(str(file_path))
+        # Otherwise return index.html for client-side routing
+        return FileResponse(str(index_html))
 
 
 # ── Lifecycle Events ─────────────────────────────────────────────
@@ -124,14 +188,22 @@ def _register_lifecycle(application: FastAPI) -> None:
         except Exception as exc:
             logger.warning("Database init warning: %s", exc)
 
-        # Initialize voice engine (lazy — fails gracefully)
+        # NOTE: default quotation template seeding is DISABLED by design.
+        # Tenants create their own templates from /quotation/templates.
+        # (The PEB_* presets in quotation_template_seed.py are still available
+        # as a one-click import option inside the Template Studio later.)
+
+        # Start the quotation render background worker (auto-generates
+        # 3D / drawings / AI renders for new client intakes).
         try:
-            from voice_engine.engine import VoiceFlowEngine
-            application.state.voice_engine = VoiceFlowEngine(model_size="tiny")
-            logger.info("Voice engine loaded (model=tiny)")
+            from api.services.quotation_render_worker import start_worker
+            start_worker()
         except Exception as exc:
-            application.state.voice_engine = None
-            logger.warning("Voice engine not available: %s", exc)
+            logger.warning("Quotation render worker not started: %s", exc)
+
+        # Voice AI is now a separate service (voice-flow).
+        # CRM integrates via API at VOICEFLOW_API_URL.
+        application.state.voice_engine = None
 
         logger.info("%s ready!", settings.APP_NAME)
 
@@ -166,25 +238,79 @@ def _include_routers(application: FastAPI) -> None:
     except Exception as exc:
         logger.warning("CRM modular router not available: %s", exc)
 
-    try:
-        from api.routers.voice import router as new_voice_router
-        application.include_router(new_voice_router)
-    except Exception as exc:
-        logger.warning("Voice modular router not available: %s", exc)
+    # Voice analysis is now in the voice-flow service.
+    # CRM accesses voice data via VoiceFlow API integration.
 
-    # Campaigns, Marketing, Analytics, Billing routers
+    # Campaigns, Analytics, Billing routers
     from api.routers.campaigns import router as new_campaigns_router
-    from api.routers.marketing import router as new_marketing_router
     from api.routers.analytics import router as new_analytics_router
     from api.routers.billing import router as new_billing_router
     application.include_router(new_campaigns_router)
-    application.include_router(new_marketing_router)
     application.include_router(new_analytics_router)
     application.include_router(new_billing_router)
 
     logger.info(
-        "New modular routers loaded (health, auth, campaigns, marketing, analytics, billing)"
+        "New modular routers loaded (health, auth, campaigns, analytics, billing)"
     )
+
+    # ── SaaS Control Layer routers ─────────────────────────────
+    try:
+        from api.routers.super_admin import router as super_admin_router
+        application.include_router(super_admin_router)
+        logger.info("Super Admin router loaded")
+    except Exception as exc:
+        logger.warning("Super Admin router not available: %s", exc)
+
+    try:
+        from api.routers.platform_support import router as platform_support_router
+        application.include_router(platform_support_router)
+        logger.info("Platform Support (tenant-side) router loaded")
+    except Exception as exc:
+        logger.warning("Platform Support router not available: %s", exc)
+
+    try:
+        from api.realtime import router as realtime_router
+        application.include_router(realtime_router)
+        logger.info("Realtime WebSocket router loaded")
+    except Exception as exc:
+        logger.warning("Realtime WebSocket router not available: %s", exc)
+
+    try:
+        from api.routers.feature_engine import router as feature_engine_router
+        application.include_router(feature_engine_router)
+        logger.info("Feature Engine router loaded")
+    except Exception as exc:
+        logger.warning("Feature Engine router not available: %s", exc)
+
+    # Quotation router (PEB)
+    try:
+        from api.routers.quotation import router as quotation_router
+        application.include_router(quotation_router)
+        logger.info("Quotation (PEB) router loaded")
+    except Exception as exc:
+        logger.warning("Quotation router not available: %s", exc)
+
+    # AI-Powered Quotation (voice-to-quote, photo-to-quote, rate prediction, market intel)
+    try:
+        from api.routers.ai_quotation import router as ai_quote_router
+        application.include_router(ai_quote_router)
+        logger.info("AI Quotation router loaded")
+    except Exception as exc:
+        logger.warning("AI Quotation router not available: %s", exc)
+
+    # ── Tendent Quotation Engine: templates, intake, portal, offers ──
+    try:
+        from api.routers.quotation_template import (
+            router as quotation_template_router,
+            offers_router as quotation_offers_router,
+            public_router as quotation_public_router,
+        )
+        application.include_router(quotation_template_router)
+        application.include_router(quotation_offers_router)
+        application.include_router(quotation_public_router)
+        logger.info("Quotation template engine routers loaded")
+    except Exception as exc:
+        logger.warning("Quotation template router not available: %s", exc)
 
     # ── Supporting module routers (Phase 2) ───────────────────
     try:
@@ -195,11 +321,27 @@ def _include_routers(application: FastAPI) -> None:
         logger.warning("Helpdesk modular router not available: %s", exc)
 
     try:
-        from api.routers.surveys import router as new_surveys_router
+        from api.routers.appointments import router as appointments_router
+        application.include_router(appointments_router)
+        logger.info("Appointments router loaded")
+    except Exception as exc:
+        logger.warning("Appointments router not available: %s", exc)
+
+    try:
+        from api.routers.surveys import router as new_surveys_router, public_router as public_surveys_router
         application.include_router(new_surveys_router)
-        logger.info("Surveys modular router loaded")
+        application.include_router(public_surveys_router)
+        logger.info("Surveys modular router loaded (auth + public)")
     except Exception as exc:
         logger.warning("Surveys modular router not available: %s", exc)
+
+    try:
+        from api.routers.inbox import router as inbox_router, public_router as public_inbox_router
+        application.include_router(inbox_router)
+        application.include_router(public_inbox_router)
+        logger.info("Inbox router loaded (auth + public webhooks)")
+    except Exception as exc:
+        logger.warning("Inbox router not available: %s", exc)
 
     try:
         from api.routers.workflows import router as new_workflows_router
@@ -238,11 +380,11 @@ def _include_routers(application: FastAPI) -> None:
     except Exception as exc:
         logger.warning("Dialer router not available: %s", exc)
 
+    # Voice Agent (cloning, knowledge, recordings) is now in the voice-flow service.
+
     # ── External module routers (may not be installed) ───────
     _load_legacy_router(application, "billing.billing_service", "billing_router", "Billing")
-    _load_legacy_router(application, "assistants.assistant_service", "assistant_router", "Assistants")
-    _load_legacy_router(application, "integrations.telephony.telephony_providers", "telephony_router", "Telephony")
-    _load_legacy_router(application, "dialer.auto_dialer", "dialer_router", "Auto Dialer")
+    # Assistants module is now in voice-flow service.
     _load_legacy_router(application, "surveys.survey_service", "survey_router", "Survey Forms")
 
     # Help Desk (two routers)
@@ -254,11 +396,8 @@ def _include_routers(application: FastAPI) -> None:
     except Exception as exc:
         logger.warning("Help Desk router not available: %s", exc)
 
-    _load_legacy_router(application, "templates.industry_templates", "industry_router", "Industry Templates")
-    _load_legacy_router(application, "tts.router", "tts_router", "TTS Voice Cloning")
-
-    # Voice AI pipeline (STT -> LLM -> TTS)
-    _load_voice_pipeline(application)
+    # Voice AI pipeline is now in the voice-flow service.
+    # CRM integrates via /api/v1/voiceflow/* proxy endpoints.
 
 
 def _load_legacy_router(
@@ -276,60 +415,6 @@ def _load_legacy_router(
         logger.info("%s router loaded", label)
     except Exception as exc:
         logger.warning("%s router not available: %s", label, exc)
-
-
-def _load_voice_pipeline(application: FastAPI) -> None:
-    """Load the full voice AI pipeline endpoints (STT -> LLM -> TTS)."""
-    try:
-        from typing import Optional
-        from fastapi import File, UploadFile
-        from voice_engine.voice_ai_service import get_voice_ai_service, VoiceTurnRequest
-
-        @application.post("/api/v1/voice/respond")
-        async def voice_respond(
-            file: UploadFile = File(...),
-            language: Optional[str] = None,
-            system_prompt: str = "You are a helpful sales assistant. Keep responses under 40 words.",
-            llm_provider: str = "groq",
-            tts_language: str = "en",
-            voice_id: Optional[str] = None,
-        ):
-            """Full voice conversation turn: upload audio -> get AI voice response."""
-            audio_bytes = await file.read()
-            req = VoiceTurnRequest(
-                audio_bytes=audio_bytes,
-                language=language,
-                system_prompt=system_prompt,
-                llm_provider=llm_provider,
-                tts_language=tts_language,
-                voice_id=voice_id,
-            )
-            svc = get_voice_ai_service()
-            turn = await svc.handle_turn(req)
-            return turn.to_dict()
-
-        @application.post("/api/v1/voice/analyze-and-speak")
-        async def analyze_and_speak(
-            file: UploadFile = File(...),
-            response_text: str = "Thank you for your message.",
-            tts_language: str = "en",
-            voice_id: Optional[str] = None,
-        ):
-            """Analyse customer audio and synthesize a given response text."""
-            audio_bytes = await file.read()
-            svc = get_voice_ai_service()
-            analysis = await svc.transcribe_and_analyze(audio_bytes)
-            tts_result = await svc.generate_response_audio(
-                text=response_text,
-                language=tts_language,
-                detected_customer_emotion=analysis.get("emotion"),
-                voice_id=voice_id,
-            )
-            return {"analysis": analysis, "response_audio": tts_result}
-
-        logger.info("Voice AI pipeline endpoints loaded")
-    except Exception as exc:
-        logger.warning("Voice AI pipeline not available: %s", exc)
 
 
 # ── Create the app instance ──────────────────────────────────────

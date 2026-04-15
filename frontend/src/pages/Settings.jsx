@@ -99,20 +99,37 @@ const integrations = [
     connected: false,
     category: 'Telephony'
   },
-  { 
-    id: 'razorpay', 
-    name: 'Razorpay', 
+  {
+    id: 'razorpay',
+    name: 'Razorpay',
     description: 'Payment gateway integration',
     icon: '💳',
     connected: true,
     category: 'Payments'
   },
+  {
+    id: 'voice_ai',
+    name: 'Voice AI Platform',
+    description: 'Connect your Voice AI agent platform for call monitoring & transcriptions',
+    icon: '🎙️',
+    connected: !!localStorage.getItem('swetha_voice_ai_config'),
+    category: 'AI',
+    configUrl: '/voice',
+  },
+  {
+    id: 'groq_ai',
+    name: 'Groq AI',
+    description: 'LLM provider for AI quotation engine (voice-to-quote, photo-to-quote)',
+    icon: '🤖',
+    connected: true,
+    category: 'AI'
+  },
 ]
 
 function ProfileSettings() {
   const [form, setForm] = useState({
-    first_name: 'VoiceFlow', last_name: 'Admin',
-    email: 'admin@voiceflow.ai', phone: '+91 98765 43210',
+    first_name: 'Swetha', last_name: 'Admin',
+    email: 'admin@swetha.in', phone: '+91 98765 43210',
     timezone: 'Asia/Kolkata', language: 'English',
   })
   const [saving, setSaving] = useState(false)
@@ -206,8 +223,8 @@ function ProfileSettings() {
 
 function OrganizationSettings() {
   const [form, setForm] = useState({
-    company_name: 'ShadowMarket', website: 'https://voiceflow.ai',
-    industry: 'Technology', size: '11-50',
+    company_name: 'Swetha Structures', website: '',
+    industry: 'Construction / PEB', size: '11-50',
     address: 'Chennai, Tamil Nadu, India', gst_number: '',
   })
   const [saving, setSaving] = useState(false)
@@ -788,15 +805,15 @@ function BillingSettings() {
         key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_demo',
         amount: plan.price * 100, // paise
         currency: 'INR',
-        name: 'VoiceFlow AI',
+        name: 'Swetha Structures CRM',
         description: `${plan.name} Plan – Monthly Subscription`,
         order_id: orderId,
         prefill: {
           name: 'Admin User',
-          email: 'admin@voiceflow.ai',
+          email: 'admin@swetha.in',
           contact: '+919876543210',
         },
-        theme: { color: '#7c3aed' },
+        theme: { color: '#D97706' },
         handler: async (response) => {
           try {
             // Verify payment on backend
@@ -1064,7 +1081,7 @@ function APISettings() {
           <div>
             <p className="font-medium text-brand-900">API Access</p>
             <p className="text-sm text-brand-700 mt-1">
-              Use the VoiceFlow API to integrate voice AI into your applications.
+              Use the Swetha CRM API to integrate voice AI and quotations into your applications.
             </p>
             <a href="#" className="text-sm text-brand-600 font-medium inline-flex items-center gap-1 mt-2 hover:underline">
               View Documentation <ExternalLink className="w-3 h-3" />

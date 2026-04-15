@@ -9,8 +9,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to path so 'from api.models' works
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 config = context.config
 
@@ -22,7 +22,10 @@ database_url = os.environ.get("DATABASE_URL", "")
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 
-target_metadata = None
+# Import all models so Alembic can detect them for autogenerate
+from api.models import Base  # noqa: E402
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline():

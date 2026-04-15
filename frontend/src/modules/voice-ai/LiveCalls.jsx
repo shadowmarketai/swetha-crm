@@ -16,6 +16,7 @@ import ResizablePanel from './components/ResizablePanel';
 import DialectBadge from './components/DialectBadge';
 import EmotionIndicator from './components/EmotionIndicator';
 import GenZBadge from './components/GenZBadge';
+import { callsAPI } from '../../services/api';
 
 /* ═══════════════════════════════════════════════════════════════════
    MOCK DATA — 8 calls with varied dialects, emotions, genZ scores
@@ -300,25 +301,69 @@ export default function LiveCallsPage() {
   /* ── State ────────────────────────────────────────────────── */
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCallId, setSelectedCallId] = useState(null);
+  const [apiCalls, setApiCalls] = useState([]);
+
+  /* ── Poll live calls from API every 5 seconds ──────────────── */
+  useEffect(() => {
+    let active = true;
+    const fetchLive = () => {
+      callsAPI.getLiveCalls()
+        .then(({ data }) => {
+          if (!active || !Array.isArray(data)) return;
+          const mapped = data.map(c => ({
+            id: `api-${c.id || c.request_id}`,
+            name: c.phone_number || `Call #${c.id}`,
+            phone: c.phone_number || '',
+            duration: '0:00',
+            sentiment: c.sentiment > 0 ? 'positive' : c.sentiment < 0 ? 'negative' : 'neutral',
+            agent: 'AI Agent',
+            status: 'active',
+            topic: c.intent || 'Call',
+            dialect: c.dialect || 'Unknown',
+            dialectConfidence: c.confidence || 0,
+            dialectPatterns: [],
+            language: c.language || 'Unknown',
+            emotion: c.emotion || 'neutral',
+            emotionConfidence: c.emotion_confidence || 0,
+            emotionTrend: [],
+            genZScore: c.gen_z_score || 0,
+            genZTerms: [],
+            codeMixLanguages: '',
+            codeMixRatio: 0,
+            direction: c.source === 'inbound' ? 'inbound' : 'outbound',
+            campaign: '',
+            startTime: c.created_at ? new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            transcript: c.transcription ? [{ speaker: 'customer', text: c.transcription, time: '0:00', emotion: c.emotion || 'neutral' }] : [],
+          }));
+          setApiCalls(mapped);
+        })
+        .catch(() => {}); // silently use mock data only
+    };
+    fetchLive();
+    const interval = setInterval(fetchLive, 5000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
+
+  const allCalls = useMemo(() => [...apiCalls, ...MOCK_CALLS], [apiCalls]);
 
   /* ── Filtered calls ───────────────────────────────────────── */
   const filteredCalls = useMemo(() => {
-    if (!searchQuery.trim()) return MOCK_CALLS;
+    if (!searchQuery.trim()) return allCalls;
     const q = searchQuery.toLowerCase();
-    return MOCK_CALLS.filter(c =>
+    return allCalls.filter(c =>
       c.name.toLowerCase().includes(q) ||
       c.phone.includes(q) ||
       c.agent.toLowerCase().includes(q) ||
       c.dialect.toLowerCase().includes(q) ||
       c.topic.toLowerCase().includes(q)
     );
-  }, [searchQuery]);
+  }, [searchQuery, allCalls]);
 
   /* ── Selected call ────────────────────────────────────────── */
   const selectedCall = useMemo(() => {
     if (!selectedCallId) return null;
-    return MOCK_CALLS.find(c => c.id === selectedCallId) || null;
-  }, [selectedCallId]);
+    return allCalls.find(c => c.id === selectedCallId) || null;
+  }, [selectedCallId, allCalls]);
 
   /* ── Auto-scroll transcript ───────────────────────────────── */
   useEffect(() => {
@@ -370,7 +415,7 @@ export default function LiveCallsPage() {
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
               </span>
               Live Calls
-              <span className="text-sm font-normal text-slate-500 ml-1">({MOCK_CALLS.length} active)</span>
+              <span className="text-sm font-normal text-slate-500 ml-1">({allCalls.length} active)</span>
             </h1>
           </div>
         </div>

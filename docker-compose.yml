@@ -50,7 +50,7 @@ services:
 
   # PostgreSQL Database
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: voiceflow-db
     environment:
       - POSTGRES_USER=postgres
@@ -140,6 +140,38 @@ services:
     restart: unless-stopped
     networks:
       - voiceflow-network
+
+  # Voice Agent — Real-time call handler (LiveKit / PIOPIY)
+  voice-agent:
+    build:
+      context: ../livekit-voice-agent
+      dockerfile: Dockerfile
+    container_name: voiceflow-voice-agent
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/voiceflow
+      - VOICEFLOW_API_URL=http://api:8000
+      - TRANSPORT=piopiy
+    env_file:
+      - .env
+    volumes:
+      - voice_recordings:/app/data/recordings
+      - voice_clones:/app/data/voices
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - voiceflow-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/agent/voices"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
   # n8n Workflow Automation
   n8n:
@@ -256,6 +288,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  voice_recordings:
+  voice_clones:
   n8n_data:
   flowise_data:
   prometheus_data:

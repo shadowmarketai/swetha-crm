@@ -8,49 +8,87 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('voiceflow_token')
-    if (token) {
+    const token = localStorage.getItem('swetha_token')
+    if (token && token !== 'demo-token-123') {
       authAPI.getProfile()
         .then(res => setUser(res.data))
-        .catch(() => localStorage.removeItem('voiceflow_token'))
+        .catch(() => localStorage.removeItem('swetha_token'))
         .finally(() => setLoading(false))
+    } else if (token === 'demo-token-123') {
+      // Restore demo user from localStorage
+      const savedUser = localStorage.getItem('swetha_user')
+      if (savedUser) {
+        setUser(JSON.parse(savedUser))
+      }
+      setLoading(false)
     } else {
       setLoading(false)
     }
   }, [])
 
   const login = async (email, password) => {
+    // Clear any stale demo tokens first
+    localStorage.removeItem('swetha_token')
+    localStorage.removeItem('swetha_user')
+
     const res = await authAPI.login({ email, password })
-    const { token, user: userData } = res.data
-    localStorage.setItem('voiceflow_token', token)
+    const data = res.data
+    // API returns { access_token, refresh_token, user }
+    const token = data.access_token || data.token
+    let userData = data.user || data
+
+    if (!token) {
+      throw new Error('No token received')
+    }
+
+    localStorage.setItem('swetha_token', token)
+
+    // Fetch full profile (includes tenant branding) — the bare login response
+    // omits the tenant object, which the dashboard layout needs for branding.
+    try {
+      const profile = await authAPI.getProfile()
+      userData = profile.data
+    } catch (err) {
+      // Fallback to login user data if /me fails
+      console.warn('getProfile after login failed, using login response', err)
+    }
+
+    localStorage.setItem('swetha_user', JSON.stringify(userData))
     setUser(userData)
     return userData
   }
 
   const register = async (data) => {
     const res = await authAPI.register(data)
-    const { token, user: userData } = res.data
-    localStorage.setItem('voiceflow_token', token)
+    const respData = res.data
+    const token = respData.access_token || respData.token
+    const userData = respData.user || respData
+    localStorage.setItem('swetha_token', token)
+    localStorage.setItem('swetha_user', JSON.stringify(userData))
     setUser(userData)
     return userData
   }
 
   const logout = () => {
-    localStorage.removeItem('voiceflow_token')
+    localStorage.removeItem('swetha_token')
+    localStorage.removeItem('swetha_user')
     setUser(null)
   }
 
-  // Demo login - bypasses API for development
+  // Demo login - bypasses API for exploring the platform
   const demoLogin = () => {
     const demoUser = {
       id: 'demo-001',
-      name: 'VoiceFlow Admin',
-      email: 'admin@voiceflow.ai',
+      name: 'Swetha Admin',
+      email: 'admin@swethastructures.com',
       role: 'admin',
-      company: 'ShadowMarket',
-      plan: 'pro',
+      company: 'Swetha Structures Pvt Ltd',
+      plan: 'professional',
+      is_super_admin: false,
+      tenant_id: '',
     }
-    localStorage.setItem('voiceflow_token', 'demo-token-123')
+    localStorage.setItem('swetha_token', 'demo-token-123')
+    localStorage.setItem('swetha_user', JSON.stringify(demoUser))
     setUser(demoUser)
     return demoUser
   }
@@ -58,21 +96,24 @@ export function AuthProvider({ children }) {
   // Demo login as a specific role - for testing RBAC
   const demoLoginAs = (role) => {
     const roleNames = {
-      admin: 'VoiceFlow Admin',
-      manager: 'VoiceFlow Manager',
-      agent: 'VoiceFlow Agent',
-      user: 'VoiceFlow User',
-      viewer: 'VoiceFlow Viewer',
+      admin: 'Swetha Admin',
+      manager: 'Swetha Manager',
+      agent: 'Swetha Agent',
+      user: 'Swetha User',
+      viewer: 'Swetha Viewer',
     }
     const demoUser = {
       id: `demo-${role}-001`,
-      name: roleNames[role] || 'VoiceFlow User',
-      email: `${role}@voiceflow.ai`,
+      name: roleNames[role] || 'Swetha User',
+      email: `${role}@swethastructures.com`,
       role: role,
-      company: 'ShadowMarket',
+      company: 'Swetha Structures Pvt Ltd',
       plan: role === 'admin' ? 'pro' : 'starter',
+      is_super_admin: false,
+      tenant_id: '',
     }
-    localStorage.setItem('voiceflow_token', 'demo-token-123')
+    localStorage.setItem('swetha_token', 'demo-token-123')
+    localStorage.setItem('swetha_user', JSON.stringify(demoUser))
     setUser(demoUser)
     return demoUser
   }

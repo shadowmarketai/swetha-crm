@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -29,6 +30,15 @@ from api.schemas.common import PaginatedResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/surveys", tags=["Surveys"])
+
+
+async def _broadcast(uid, event_type: str, payload: dict) -> None:
+    """Best-effort realtime broadcast — never blocks the request on failure."""
+    try:
+        from api.realtime import manager
+        await manager.to_user(str(uid), event_type, payload)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("survey realtime broadcast failed (%s): %s", event_type, exc)
 
 
 # ── Helpers ─────────────────────────────────────────────────────
@@ -102,15 +112,14 @@ def _response_to_dict(resp: SurveyResponse) -> dict:
     }
 
 
-def _get_user_id(current_user: dict) -> int:
-    """Extract a numeric user_id from the current_user dict."""
+def _get_user_id(current_user: dict) -> str:
+    """Return the user_id (string) from the current_user dict.
+
+    `users.id` in this project is a TEXT column (e.g. 'sw-admin', 'sa-001'),
+    so we pass it through unchanged — don't hash or coerce to int.
+    """
     raw = current_user.get("id", "")
-    if isinstance(raw, int):
-        return raw
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        return abs(hash(raw)) % (2**31)
+    return str(raw) if raw is not None else ""
 
 
 # ── GET / ───────────────────────────────────────────────────────
@@ -209,11 +218,24 @@ async def create_survey(
         user_id=uid,
     )
     db.add(survey)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        logger.error("Survey create IntegrityError (user=%s): %s", uid, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Could not create survey: the authenticated user does not exist "
+                "in the users table (FK violation). Log in as a real user."
+            ),
+        )
     db.refresh(survey)
 
     logger.info("Survey created: %s (user=%s)", survey.title, uid)
-    return SurveyDetail(**_survey_to_dict(survey))
+    payload = _survey_to_dict(survey)
+    await _broadcast(uid, "survey.created", payload)
+    return SurveyDetail(**payload)
 
 
 # ── GET /{survey_id} ───────────────────────────────────────────
@@ -284,7 +306,9 @@ async def update_survey(
     db.refresh(survey)
 
     logger.info("Survey updated: %s (user=%s)", survey.title, uid)
-    return SurveyDetail(**_survey_to_dict(survey))
+    payload = _survey_to_dict(survey)
+    await _broadcast(uid, "survey.updated", payload)
+    return SurveyDetail(**payload)
 
 
 # ── DELETE /{survey_id} ─────────────────────────────────────────
@@ -326,6 +350,7 @@ async def delete_survey(
     db.commit()
 
     logger.info("Survey deleted: %s (user=%s)", survey.title, uid)
+    await _broadcast(uid, "survey.deleted", {"id": survey_id})
 
 
 # ── POST /{survey_id}/publish ───────────────────────────────────
@@ -373,7 +398,9 @@ async def publish_survey(
     db.refresh(survey)
 
     logger.info("Survey published: %s (user=%s)", survey.title, uid)
-    return SurveyDetail(**_survey_to_dict(survey))
+    payload = _survey_to_dict(survey)
+    await _broadcast(uid, "survey.updated", payload)
+    return SurveyDetail(**payload)
 
 
 # ── POST /{survey_id}/responses ─────────────────────────────────
@@ -513,6 +540,12 @@ async def submit_response(
     db.refresh(response)
 
     logger.info("Survey response submitted for survey %s (user=%s)", survey_id, uid)
+    response_payload = _response_to_dict(response)
+    # Attach survey title for easier client-side rendering of "all responses" view.
+    response_payload["survey_title"] = survey.title
+    await _broadcast(uid, "survey.response.created", response_payload)
+    # Also broadcast the updated survey so dashboards/forms reflect new totals.
+    await _broadcast(uid, "survey.updated", _survey_to_dict(survey))
     return SurveyResponseDetail(**_response_to_dict(response))
 
 
@@ -692,3 +725,165 @@ async def survey_analytics(
         responses_by_source=source_counts,
         responses_over_time=responses_over_time,
     )
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Public router — unauthenticated endpoints for shareable survey links
+# ═══════════════════════════════════════════════════════════════════
+
+public_router = APIRouter(prefix="/api/v1/public/surveys", tags=["Surveys (Public)"])
+
+
+def _public_survey_view(survey: Survey) -> dict:
+    """Sanitized survey payload safe to expose to anonymous respondents."""
+    return {
+        "id": survey.id,
+        "title": survey.title,
+        "description": survey.description,
+        "slug": survey.slug,
+        "questions": survey.questions or [],
+        "theme": survey.theme,
+        "logo_url": survey.logo_url,
+        "thank_you_message": survey.thank_you_message,
+        "redirect_url": survey.redirect_url,
+        "show_progress_bar": survey.show_progress_bar,
+        "randomize_questions": survey.randomize_questions,
+        "is_anonymous": survey.is_anonymous,
+    }
+
+
+@public_router.get(
+    "/{slug}",
+    summary="Fetch a public, active survey by slug",
+)
+async def get_public_survey(slug: str, db: Session = Depends(get_db)) -> dict:
+    """Anonymous endpoint used by the shareable respondent view."""
+    survey = db.query(Survey).filter(
+        Survey.slug == slug,
+        Survey.is_deleted == False,  # noqa: E712
+    ).first()
+
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    if survey.status != SurveyStatus.ACTIVE:
+        raise HTTPException(status_code=410, detail="This survey is not currently accepting responses")
+
+    now = datetime.now(timezone.utc)
+    if survey.starts_at and now < survey.starts_at:
+        raise HTTPException(status_code=410, detail="Survey has not started yet")
+    if survey.ends_at and now > survey.ends_at:
+        raise HTTPException(status_code=410, detail="Survey has ended")
+    if survey.max_responses and survey.total_responses >= survey.max_responses:
+        raise HTTPException(status_code=410, detail="Survey has reached the maximum number of responses")
+
+    return _public_survey_view(survey)
+
+
+@public_router.post(
+    "/{slug}/responses",
+    status_code=201,
+    summary="Submit an anonymous response by slug",
+)
+async def submit_public_response(
+    slug: str,
+    body: SurveyResponseCreate,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Anonymous response submission. Mirrors the authenticated submit_response logic."""
+    survey = db.query(Survey).filter(
+        Survey.slug == slug,
+        Survey.is_deleted == False,  # noqa: E712
+    ).first()
+
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    if survey.status != SurveyStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail="Survey is not currently accepting responses")
+    if survey.max_responses and survey.total_responses >= survey.max_responses:
+        raise HTTPException(status_code=409, detail="Survey has reached the maximum number of responses")
+
+    now = datetime.now(timezone.utc)
+    if survey.starts_at and now < survey.starts_at:
+        raise HTTPException(status_code=409, detail="Survey has not started yet")
+    if survey.ends_at and now > survey.ends_at:
+        raise HTTPException(status_code=409, detail="Survey has ended")
+
+    if not survey.allow_multiple_responses and body.respondent_email:
+        existing = db.query(SurveyResponse).filter(
+            SurveyResponse.survey_id == survey.id,
+            SurveyResponse.respondent_email == body.respondent_email,
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail="A response with this email already exists for this survey",
+            )
+
+    completion_time = None
+    if body.started_at and body.completed_at:
+        completion_time = (body.completed_at - body.started_at).total_seconds()
+    elif body.started_at and body.is_complete:
+        completion_time = (now - body.started_at).total_seconds()
+
+    nps_score = None
+    if survey.questions:
+        for q in survey.questions:
+            if q.get("type") == "nps" and q.get("id") in body.answers:
+                try:
+                    nps_score = int(body.answers[q["id"]])
+                except (ValueError, TypeError):
+                    pass
+                break
+
+    response = SurveyResponse(
+        answers=body.answers,
+        respondent_name=body.respondent_name,
+        respondent_email=body.respondent_email,
+        respondent_phone=body.respondent_phone,
+        is_complete=body.is_complete,
+        started_at=body.started_at,
+        completed_at=body.completed_at or (now if body.is_complete else None),
+        completion_time_seconds=completion_time,
+        source=body.source or "public_link",
+        nps_score=nps_score,
+        survey_id=survey.id,
+        user_id=survey.user_id,  # owner of the survey
+    )
+    db.add(response)
+
+    survey.total_started += 1
+    if body.is_complete:
+        survey.total_responses += 1
+        if survey.total_started > 0:
+            survey.completion_rate = round(
+                (survey.total_responses / survey.total_started) * 100, 2
+            )
+        if completion_time:
+            if survey.avg_completion_time_seconds:
+                total_time = survey.avg_completion_time_seconds * (survey.total_responses - 1)
+                survey.avg_completion_time_seconds = round(
+                    (total_time + completion_time) / survey.total_responses, 2
+                )
+            else:
+                survey.avg_completion_time_seconds = round(completion_time, 2)
+        if nps_score is not None:
+            if survey.avg_nps_score is not None:
+                total_nps = survey.avg_nps_score * (survey.total_responses - 1)
+                survey.avg_nps_score = round(
+                    (total_nps + nps_score) / survey.total_responses, 2
+                )
+            else:
+                survey.avg_nps_score = float(nps_score)
+
+    db.commit()
+    db.refresh(response)
+
+    logger.info("Public survey response submitted: slug= id=", slug, response.id)
+
+    payload = _response_to_dict(response)
+    payload["survey_title"] = survey.title
+    await _broadcast(survey.user_id, "survey.response.created", payload)
+    await _broadcast(survey.user_id, "survey.updated", _survey_to_dict(survey))
+
+    return {"id": response.id, "is_complete": response.is_complete, "thank_you_message": survey.thank_you_message}

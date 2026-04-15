@@ -66,37 +66,47 @@ class IndicParlerTTSEngine(BaseTTSEngine):
         self.model_id = "ai4bharat/indic-parler-tts"
         self.processor = None
         self.vocoder = None
-        
+        self._fallback_mode = False
+
     @property
     def engine_name(self) -> str:
         return "indic_parler"
-    
+
     async def load_model(self) -> bool:
         """Load Indic Parler-TTS model"""
         try:
-            logger.info(f"Loading Indic Parler-TTS model: {self.model_id}")
-            
+            logger.info("Loading Indic Parler-TTS model: %s", self.model_id)
+
             # Import here to avoid loading at module level
             from transformers import AutoTokenizer, AutoModelForTextToWaveform
             import torch
-            
+
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Using device: {device}")
-            
+            logger.info("Using device: %s", device)
+
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
             self.model = AutoModelForTextToWaveform.from_pretrained(
                 self.model_id,
                 torch_dtype=torch.float16 if device == "cuda" else torch.float32
             ).to(device)
-            
+
             self.device = device
             self.is_loaded = True
+            self._fallback_mode = False
             logger.info("Indic Parler-TTS model loaded successfully")
             return True
-            
-        except Exception as e:
-            logger.error(f"Failed to load Indic Parler-TTS: {e}")
-            return False
+
+        except (ImportError, OSError, Exception) as e:
+            logger.warning("Native Indic Parler-TTS unavailable: %s — trying edge-tts fallback", e)
+            try:
+                import edge_tts  # noqa: F401
+                self.is_loaded = True
+                self._fallback_mode = True
+                logger.info("Indic Parler-TTS using edge-tts fallback")
+                return True
+            except ImportError:
+                logger.error("Neither transformers nor edge-tts installed — Indic Parler-TTS unavailable")
+                return False
     
     async def unload_model(self) -> bool:
         """Unload model from memory"""
@@ -178,6 +188,31 @@ class IndicParlerTTSEngine(BaseTTSEngine):
         prompt = " ".join(filter(None, prompt_parts))
         return prompt
     
+    async def _fallback_synthesize(self, text: str, language: str, pace: float) -> bytes:
+        """Fallback using edge-tts for Indian languages"""
+        import edge_tts
+
+        voice_map = {
+            "ta": "ta-IN-PallaviNeural",
+            "hi": "hi-IN-SwaraNeural",
+            "te": "te-IN-ShrutiNeural",
+            "kn": "kn-IN-SapnaNeural",
+            "ml": "ml-IN-SobhanaNeural",
+            "bn": "bn-IN-TanishaaNeural",
+            "mr": "mr-IN-AarohiNeural",
+            "gu": "gu-IN-DhwaniNeural",
+            "en": "en-IN-NeerjaNeural",
+        }
+        voice = voice_map.get(language, "en-IN-NeerjaNeural")
+        rate = f"{int((pace - 1) * 100):+d}%"
+
+        communicate = edge_tts.Communicate(text, voice, rate=rate)
+        audio_data = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data += chunk["data"]
+        return audio_data
+
     async def synthesize(
         self,
         text: str,
@@ -190,34 +225,41 @@ class IndicParlerTTSEngine(BaseTTSEngine):
         **kwargs
     ) -> bytes:
         """Generate audio from text"""
-        
+
         if not self.is_loaded:
             await self.load_model()
-        
+
         start_time = time.time()
         emotion = emotion or "neutral"
-        
+
+        # Use edge-tts fallback if native model not available
+        if self._fallback_mode:
+            audio_bytes = await self._fallback_synthesize(text, language, pace)
+            latency = (time.time() - start_time) * 1000
+            logger.info("Indic Parler-TTS (edge-tts fallback) completed in %.0fms", latency)
+            return audio_bytes
+
         try:
             import torch
             import scipy.io.wavfile as wavfile
-            
+
             # Build descriptive prompt
             prompt = self._build_prompt(language, emotion, pace, pitch, kwargs.get("energy"), dialect)
-            
+
             # Tokenize
             inputs = self.tokenizer(
                 text,
                 return_tensors="pt",
                 padding=True
             ).to(self.device)
-            
+
             # Add prompt
             prompt_inputs = self.tokenizer(
                 prompt,
                 return_tensors="pt",
                 padding=True
             ).to(self.device)
-            
+
             # Generate
             with torch.no_grad():
                 output = self.model.generate(
@@ -226,22 +268,22 @@ class IndicParlerTTSEngine(BaseTTSEngine):
                     do_sample=True,
                     temperature=0.7
                 )
-            
+
             # Convert to audio
             audio = output.cpu().numpy().squeeze()
-            
+
             # Save to bytes
             buffer = io.BytesIO()
             wavfile.write(buffer, 22050, audio)
             buffer.seek(0)
-            
+
             latency = (time.time() - start_time) * 1000
-            logger.info(f"Indic Parler-TTS synthesis completed in {latency:.0f}ms")
-            
+            logger.info("Indic Parler-TTS synthesis completed in %.0fms", latency)
+
             return buffer.read()
-            
+
         except Exception as e:
-            logger.error(f"Synthesis failed: {e}")
+            logger.error("Synthesis failed: %s", e)
             raise
     
     async def synthesize_stream(

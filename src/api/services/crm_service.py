@@ -175,7 +175,7 @@ def _activity_to_dict(activity: Activity) -> dict[str, Any]:
 
 def get_leads(
     db: Session,
-    user_id: int,
+    user_id: str,
     skip: int = 0,
     limit: int = 20,
     status: Optional[str] = None,
@@ -225,7 +225,7 @@ def get_leads(
     }
 
 
-def get_lead_by_id(db: Session, user_id: int, lead_id: int) -> Optional[dict[str, Any]]:
+def get_lead_by_id(db: Session, user_id: str, lead_id) -> Optional[dict[str, Any]]:
     """Get a single lead by ID, including voice analyses."""
     lead = (
         db.query(Lead)
@@ -266,7 +266,7 @@ def get_lead_by_id(db: Session, user_id: int, lead_id: int) -> Optional[dict[str
     return lead_dict
 
 
-def create_lead(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_lead(db: Session, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Create a new lead."""
     # Map schema source string to enum if provided
     source_val = None
@@ -307,7 +307,7 @@ def create_lead(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, An
     return _lead_to_dict(lead)
 
 
-def update_lead(db: Session, user_id: int, lead_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+def update_lead(db: Session, user_id: str, lead_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Update an existing lead (partial update)."""
     lead = (
         db.query(Lead)
@@ -368,7 +368,7 @@ def update_lead(db: Session, user_id: int, lead_id: int, data: dict[str, Any]) -
     return _lead_to_dict(lead)
 
 
-def delete_lead(db: Session, user_id: int, lead_id: int) -> bool:
+def delete_lead(db: Session, user_id: str, lead_id: int) -> bool:
     """Soft-delete a lead."""
     lead = (
         db.query(Lead)
@@ -393,7 +393,7 @@ def delete_lead(db: Session, user_id: int, lead_id: int) -> bool:
 
 def get_companies(
     db: Session,
-    user_id: int,
+    user_id: str,
     skip: int = 0,
     limit: int = 20,
     search: Optional[str] = None,
@@ -434,7 +434,7 @@ def get_companies(
     }
 
 
-def get_company_by_id(db: Session, user_id: int, company_id: int) -> Optional[dict[str, Any]]:
+def get_company_by_id(db: Session, user_id: str, company_id: int) -> Optional[dict[str, Any]]:
     """Get a single company by ID with contacts and deals."""
     company = (
         db.query(Company)
@@ -477,7 +477,7 @@ def get_company_by_id(db: Session, user_id: int, company_id: int) -> Optional[di
     return company_dict
 
 
-def create_company(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_company(db: Session, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Create a new company."""
     company = Company(
         name=data["name"],
@@ -501,7 +501,7 @@ def create_company(db: Session, user_id: int, data: dict[str, Any]) -> dict[str,
 
 
 def update_company(
-    db: Session, user_id: int, company_id: int, data: dict[str, Any]
+    db: Session, user_id: str, company_id: int, data: dict[str, Any]
 ) -> Optional[dict[str, Any]]:
     """Update an existing company (partial update)."""
     company = (
@@ -539,7 +539,7 @@ def update_company(
     return _company_to_dict(company)
 
 
-def delete_company(db: Session, user_id: int, company_id: int) -> bool:
+def delete_company(db: Session, user_id: str, company_id: int) -> bool:
     """Soft-delete a company."""
     company = (
         db.query(Company)
@@ -564,7 +564,7 @@ def delete_company(db: Session, user_id: int, company_id: int) -> bool:
 
 def get_contacts(
     db: Session,
-    user_id: int,
+    user_id: str,
     skip: int = 0,
     limit: int = 20,
     company_id: Optional[int] = None,
@@ -597,7 +597,7 @@ def get_contacts(
     }
 
 
-def get_contact_by_id(db: Session, user_id: int, contact_id: int) -> Optional[dict[str, Any]]:
+def get_contact_by_id(db: Session, user_id: str, contact_id: int) -> Optional[dict[str, Any]]:
     """Get a single contact by ID."""
     contact = (
         db.query(Contact)
@@ -612,7 +612,7 @@ def get_contact_by_id(db: Session, user_id: int, contact_id: int) -> Optional[di
     return _contact_to_dict(contact)
 
 
-def create_contact(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_contact(db: Session, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Create a new contact."""
     company_id_val = None
     if data.get("company_id"):
@@ -647,7 +647,7 @@ def create_contact(db: Session, user_id: int, data: dict[str, Any]) -> dict[str,
 
 
 def update_contact(
-    db: Session, user_id: int, contact_id: int, data: dict[str, Any]
+    db: Session, user_id: str, contact_id: int, data: dict[str, Any]
 ) -> Optional[dict[str, Any]]:
     """Update an existing contact (partial update)."""
     contact = (
@@ -703,7 +703,7 @@ def update_contact(
 
 def get_deals(
     db: Session,
-    user_id: int,
+    user_id: str,
     skip: int = 0,
     limit: int = 20,
     stage: Optional[str] = None,
@@ -738,7 +738,7 @@ def get_deals(
     }
 
 
-def get_deal_by_id(db: Session, user_id: int, deal_id: int) -> Optional[dict[str, Any]]:
+def get_deal_by_id(db: Session, user_id: str, deal_id: int) -> Optional[dict[str, Any]]:
     """Get a single deal by ID."""
     deal = (
         db.query(Deal)
@@ -765,7 +765,7 @@ def get_deal_by_id(db: Session, user_id: int, deal_id: int) -> Optional[dict[str
     return deal_dict
 
 
-def create_deal(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_deal(db: Session, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Create a new deal."""
     stage_val = DealStage.DISCOVERY
     if data.get("stage"):
@@ -806,7 +806,7 @@ def create_deal(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, An
     return _deal_to_dict(deal)
 
 
-def update_deal(db: Session, user_id: int, deal_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+def update_deal(db: Session, user_id: str, deal_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Update an existing deal (partial update)."""
     deal = (
         db.query(Deal)
@@ -888,7 +888,7 @@ def update_deal(db: Session, user_id: int, deal_id: int, data: dict[str, Any]) -
 
 def get_activities(
     db: Session,
-    user_id: int,
+    user_id: str,
     skip: int = 0,
     limit: int = 20,
     lead_id: Optional[int] = None,
@@ -926,7 +926,7 @@ def get_activities(
     }
 
 
-def create_activity(db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def create_activity(db: Session, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Create a new activity."""
     type_val = ActivityType(data["activity_type"])
 

@@ -7,14 +7,10 @@ import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 
-// React Query hooks — real API data with mock fallback
-let useVoiceStats, useVoiceAnalyses, useDialerCampaigns;
-try {
-  const api = require('../../hooks/api');
-  useVoiceStats = api.useVoiceStats;
-  useVoiceAnalyses = api.useVoiceAnalyses;
-  useDialerCampaigns = api.useDialerCampaigns;
-} catch { /* hooks not available, use mock data */ }
+// Voice AI hooks — feature is disabled (separate SaaS), stubs only
+const useVoiceStats = null;
+const useVoiceAnalyses = null;
+const useDialerCampaigns = null;
 import {
   Phone, PhoneCall, PhoneOff, Mic, Users, TrendingUp, TrendingDown, Clock,
   Play, Pause, Volume2, BarChart3, Zap, Target, Calendar, Activity,
@@ -198,15 +194,10 @@ export default function VoiceAIDashboard() {
   const canCreate = can('voiceAI', 'create');
   const canUpdate = can('voiceAI', 'update');
 
-  /* ── API Data (real) with mock fallback ──────────────────── */
-  let apiStats = null;
-  let apiAnalyses = null;
-  let apiCampaigns = null;
-  try {
-    if (useVoiceStats) apiStats = useVoiceStats();
-    if (useVoiceAnalyses) apiAnalyses = useVoiceAnalyses({ limit: 10 });
-    if (useDialerCampaigns) apiCampaigns = useDialerCampaigns();
-  } catch { /* API unavailable */ }
+  /* ── API Data — voice AI disabled, using mock fallback ───── */
+  const apiStats = null;
+  const apiAnalyses = null;
+  const apiCampaigns = null;
 
   /* ── State (mock fallback) ─────────────────────────────── */
   const mockCampaigns = [

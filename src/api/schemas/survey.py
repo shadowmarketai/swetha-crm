@@ -101,7 +101,7 @@ class SurveyResponseDetail(BaseModel):
     nps_score: Optional[int] = None
     satisfaction_score: Optional[float] = None
     survey_id: int
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     lead_id: Optional[int] = None
     contact_id: Optional[int] = None
     created_at: Optional[datetime] = None
@@ -138,7 +138,7 @@ class SurveyDetail(BaseModel):
     avg_nps_score: Optional[float] = None
     distribution_channels: Optional[list[str]] = None
     tags: Optional[list[str]] = None
-    user_id: int
+    user_id: str
     campaign_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

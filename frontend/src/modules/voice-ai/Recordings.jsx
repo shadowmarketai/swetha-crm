@@ -1,12 +1,34 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   Search, LayoutGrid, List, Play, Pause, Download, Share2, Trash2,
-  FileAudio, Filter, ChevronDown, Clock, HardDrive, User
+  FileAudio, Filter, ChevronDown, Clock, HardDrive, User, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import DialectBadge from './components/DialectBadge';
 import EmotionIndicator from './components/EmotionIndicator';
 import GenZBadge from './components/GenZBadge';
+import { ttsAPI, voiceAgentAPI } from '../../services/api';
+
+const DIALECT_TO_LANG = { Kongu: 'ta', Chennai: 'ta', Madurai: 'ta', Tirunelveli: 'ta' };
+const LANG_TO_BCP47 = { ta: 'ta-IN', hi: 'hi-IN', en: 'en-IN', te: 'te-IN', kn: 'kn-IN', ml: 'ml-IN' };
+
+/** Browser-native SpeechSynthesis fallback */
+function browserSpeak(text, { lang = 'en-IN', rate = 1.0, onStart, onEnd } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!window.speechSynthesis) { reject(new Error('Not supported')); return; }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang;
+    utter.rate = Math.max(0.1, Math.min(rate, 10));
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find(v => v.lang === lang) || voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+    if (match) utter.voice = match;
+    utter.onstart = () => onStart?.();
+    utter.onend = () => { onEnd?.(); resolve(); };
+    utter.onerror = (e) => { onEnd?.(); reject(e); };
+    window.speechSynthesis.speak(utter);
+  });
+}
 
 // ── Mock Data ────────────────────────────────────────────────────────────────
 const mockRecordings = [
@@ -187,11 +209,49 @@ export default function RecordingsPage() {
   const [search, setSearch] = useState('');
   const [dialectFilter, setDialectFilter] = useState('All');
   const [playingId, setPlayingId] = useState(null);
+  const [loadingId, setLoadingId] = useState(null);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [apiRecordings, setApiRecordings] = useState([]);
+  const audioRef = useRef(null);
+  const audioCache = useRef({}); // cache generated audio URLs by recording id
+
+  // Fetch real recordings from API, merge with mock data
+  useEffect(() => {
+    let cancelled = false;
+    voiceAgentAPI.listRecordings(undefined, 100)
+      .then(({ data }) => {
+        if (cancelled || !Array.isArray(data)) return;
+        const mapped = data.map(r => ({
+          id: `api-${r.id}`,
+          apiId: r.id,
+          name: r.caller_number ? `${r.caller_number} - Call` : `Recording #${r.id}`,
+          agent: r.agent_voice_id || 'AI Agent',
+          duration: r.duration_seconds ? `${Math.floor(r.duration_seconds / 60)}:${String(Math.floor(r.duration_seconds % 60)).padStart(2, '0')}` : '0:00',
+          durationSec: r.duration_seconds || 0,
+          date: r.created_at ? r.created_at.split('T')[0] : '',
+          size: r.recording_size_bytes ? `${(r.recording_size_bytes / 1048576).toFixed(1)} MB` : '—',
+          dialect: 'Unknown',
+          dialectConfidence: 0,
+          emotion: r.caller_emotion || 'neutral',
+          emotionConfidence: 0.7,
+          genZScore: 0,
+          genZTerms: [],
+          transcriptPreview: r.full_transcript ? [r.full_transcript.slice(0, 100)] : [],
+          playing: false,
+          progress: 0,
+          isApi: true,
+        }));
+        setApiRecordings(mapped);
+      })
+      .catch(() => {}); // silently fall back to mock only
+    return () => { cancelled = true; };
+  }, []);
+
+  const allRecordings = useMemo(() => [...apiRecordings, ...mockRecordings], [apiRecordings]);
 
   // ── Filtering ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let result = [...mockRecordings];
+    let result = [...allRecordings];
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -204,11 +264,85 @@ export default function RecordingsPage() {
     return result;
   }, [search, dialectFilter]);
 
+  const browserSpeakingId = useRef(null);
+
   // ── Play toggle ────────────────────────────────────────────────────────
-  const togglePlay = (id) => {
-    setPlayingId(prev => (prev === id ? null : id));
-    toast.success(playingId === id ? 'Paused' : 'Playing recording...');
-  };
+  const togglePlay = useCallback(async (rec) => {
+    const id = typeof rec === 'string' ? rec : rec.id;
+    const recording = allRecordings.find(r => r.id === id) || mockRecordings.find(r => r.id === id);
+    if (!recording) return;
+
+    // If currently playing this recording, pause/stop it
+    if (playingId === id) {
+      if (browserSpeakingId.current === id) {
+        window.speechSynthesis?.cancel();
+        browserSpeakingId.current = null;
+      }
+      if (audioRef.current) { audioRef.current.pause(); }
+      setPlayingId(null);
+      return;
+    }
+
+    // Stop any currently playing audio
+    window.speechSynthesis?.cancel();
+    browserSpeakingId.current = null;
+    if (audioRef.current) { audioRef.current.pause(); }
+
+    // Check cache first (from a previous successful API call)
+    if (audioCache.current[id]) {
+      audioRef.current.src = audioCache.current[id];
+      audioRef.current.play().catch(() => {});
+      setPlayingId(id);
+      return;
+    }
+
+    const text = recording.transcriptPreview.join(' ');
+    const lang = DIALECT_TO_LANG[recording.dialect] || 'ta';
+
+    // Try backend TTS API first
+    setLoadingId(id);
+    try {
+      const { data } = await ttsAPI.synthesize({
+        text,
+        language: lang,
+        dialect: recording.dialect.toLowerCase(),
+        emotion: recording.emotion || 'neutral',
+      });
+      const audioUrl = `data:audio/${data.format || data.audio_format || 'wav'};base64,${data.audio_base64}`;
+      audioCache.current[id] = audioUrl;
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.play().catch(() => {});
+      }
+      setPlayingId(id);
+      setLoadingId(null);
+      return;
+    } catch (_apiErr) {
+      // API unavailable — fall through to browser TTS
+    }
+
+    // Fallback: browser speech synthesis
+    try {
+      setLoadingId(null);
+      setPlayingId(id);
+      browserSpeakingId.current = id;
+      await browserSpeak(text, {
+        lang: LANG_TO_BCP47[lang] || 'en-IN',
+        rate: 1.0,
+        onStart: () => {},
+        onEnd: () => {
+          if (browserSpeakingId.current === id) {
+            setPlayingId(null);
+            browserSpeakingId.current = null;
+          }
+        },
+      });
+    } catch (err) {
+      toast.error('Playback failed — no TTS engine available');
+      setPlayingId(null);
+      setLoadingId(null);
+    }
+  }, [playingId]);
 
   // ── Actions ────────────────────────────────────────────────────────────
   const handleDownload = (rec) => toast.success(`Downloading "${rec.name}"...`);
@@ -266,13 +400,14 @@ export default function RecordingsPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => togglePlay(rec.id)}
+              disabled={loadingId === rec.id}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors flex-shrink-0 ${
                 isPlaying
                   ? 'bg-indigo-600 text-white'
                   : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-900/50'
-              }`}
+              } disabled:opacity-50`}
             >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              {loadingId === rec.id ? <Loader2 className="w-4 h-4 animate-spin" /> : isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
             </button>
             <div className="flex-1">
               <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -292,10 +427,16 @@ export default function RecordingsPage() {
         <div className="flex border-t border-slate-100 dark:border-slate-700/50 divide-x divide-slate-100 dark:divide-slate-700/50">
           <button
             onClick={() => togglePlay(rec.id)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+            disabled={loadingId === rec.id}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors disabled:opacity-50"
           >
-            <Play className="w-3.5 h-3.5" />
-            Play
+            {loadingId === rec.id ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading</>
+            ) : playingId === rec.id ? (
+              <><Pause className="w-3.5 h-3.5" /> Pause</>
+            ) : (
+              <><Play className="w-3.5 h-3.5" /> Play</>
+            )}
           </button>
           <button
             onClick={() => handleDownload(rec)}
@@ -486,14 +627,15 @@ export default function RecordingsPage() {
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => togglePlay(rec.id)}
+                            disabled={loadingId === rec.id}
                             className={`p-1.5 rounded-lg transition-colors ${
                               isPlaying
                                 ? 'bg-indigo-600 text-white'
                                 : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'
-                            }`}
-                            title={isPlaying ? 'Pause' : 'Play'}
+                            } disabled:opacity-50`}
+                            title={loadingId === rec.id ? 'Loading...' : isPlaying ? 'Pause' : 'Play'}
                           >
-                            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                            {loadingId === rec.id ? <Loader2 className="w-4 h-4 animate-spin" /> : isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                           </button>
                           <button
                             onClick={() => handleDownload(rec)}
@@ -526,6 +668,9 @@ export default function RecordingsPage() {
           </div>
         )}
       </div>
+
+      {/* Hidden audio element */}
+      <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
 
       {/* Footer summary */}
       <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">

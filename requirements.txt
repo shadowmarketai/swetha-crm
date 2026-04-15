@@ -34,6 +34,7 @@ redis==5.0.1
 # Authentication & Security
 # NOTE: python-jose removed (KB-004: use PyJWT only)
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 pyjwt==2.8.0
 email-validator>=2.1.0
 slowapi>=0.1.9
@@ -107,6 +108,7 @@ cryptography>=41.0.0
 
 # Database - Production
 psycopg2-binary>=2.9.0
+pgvector>=0.3.0
 
 # Background Tasks
 flower>=2.0.0

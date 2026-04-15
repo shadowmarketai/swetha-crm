@@ -215,3 +215,39 @@ export {
   dashboardKeys,
   type CRMDashboardStats,
 } from './useDashboard';
+
+// ── Voice Agent (Cloned Voices, Knowledge, Recordings) ──
+export {
+  useClonedVoices,
+  useClonedVoice,
+  useCloneVoice,
+  useDeleteVoice,
+  useTestVoice,
+  useKnowledgeDocs,
+  useAddKnowledge,
+  useBulkAddKnowledge,
+  useUpdateKnowledge,
+  useDeleteKnowledge,
+  useAgentRecordings,
+  useAgentRecording,
+  useRecordingStats,
+  useAnalyzeRecording,
+  voiceAgentKeys,
+} from './useVoiceAgent';
+
+// ── PEB Quotation ──
+export {
+  useQuotations,
+  useQuotation,
+  useQuotationStats,
+  useQuotationLogs,
+  useQuotationsByLead,
+  useCalculateBOQ,
+  useCreateQuotation,
+  useUpdateQuotation,
+  useDeleteQuotation,
+  useGeneratePdf,
+  useReviseQuotation,
+  useChangeQuotationStatus,
+  quotationKeys,
+} from './useQuotation';

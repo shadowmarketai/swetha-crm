@@ -82,14 +82,25 @@ class TTSService:
         if engine_type not in self.engines:
             config = TTS_ENGINE_CONFIG.get(engine_type, {})
             engine_class = self._engine_classes.get(engine_type)
-            
+
+            # Fallback: match by string value if direct enum lookup fails
+            if not engine_class:
+                for key, cls in self._engine_classes.items():
+                    if key.value == getattr(engine_type, 'value', str(engine_type)):
+                        engine_class = cls
+                        engine_type = key
+                        config = TTS_ENGINE_CONFIG.get(engine_type, {})
+                        break
+
             if not engine_class:
                 raise ValueError(f"Engine {engine_type} not implemented")
-            
+
             engine = engine_class(config)
-            await engine.load_model()
+            loaded = await engine.load_model()
+            if not loaded:
+                raise RuntimeError(f"Engine {engine_type.value} failed to load")
             self.engines[engine_type] = engine
-        
+
         return self.engines[engine_type]
     
     def select_engine(
@@ -146,22 +157,59 @@ class TTSService:
         
         return EMOTION_RESPONSE_MAPPING["neutral"]
     
+    # Fallback order when a selected engine fails
+    ENGINE_FALLBACK_ORDER = [
+        TTSEngine.INDIC_PARLER,
+        TTSEngine.OPENVOICE_V2,
+        TTSEngine.INDICF5,
+        TTSEngine.SVARA,
+        TTSEngine.XTTS_V2,
+    ]
+
+    async def _get_engine_with_fallback(
+        self,
+        engine_type: TTSEngine,
+        language: str = None
+    ) -> tuple:
+        """Try to get the requested engine; on failure, walk the fallback chain.
+        Returns (engine_instance, actual_engine_type).
+        """
+        # Try the requested engine first
+        try:
+            engine = await self._get_engine(engine_type)
+            return engine, engine_type
+        except Exception as e:
+            logger.warning("Primary engine %s failed: %s — trying fallbacks", engine_type, e)
+
+        # Walk fallback chain
+        for fallback in self.ENGINE_FALLBACK_ORDER:
+            if fallback == engine_type:
+                continue
+            try:
+                engine = await self._get_engine(fallback)
+                logger.info("Using fallback engine %s instead of %s", fallback, engine_type)
+                return engine, fallback
+            except Exception:
+                continue
+
+        raise RuntimeError("All TTS engines failed to load")
+
     async def synthesize(self, request: TTSRequest) -> TTSResponse:
         """
         Main synthesis method with intelligent engine selection
         """
         start_time = time.time()
-        
+
         # Determine emotion response if customer emotion detected
         response_config = None
         emotion = request.emotion or EmotionType.NEUTRAL
-        
+
         if request.detected_customer_emotion:
             response_config = self.get_emotion_for_response(
                 request.detected_customer_emotion
             )
             emotion = EmotionType(response_config.get("tts_emotion", "neutral"))
-        
+
         # Select engine
         engine_type = request.engine
         if not engine_type:
@@ -171,10 +219,12 @@ class TTSService:
                 use_case=request.use_case,
                 detected_customer_emotion=request.detected_customer_emotion
             )
-        
-        # Get engine
-        engine = await self._get_engine(engine_type)
-        
+
+        # Get engine (with automatic fallback on failure)
+        engine, engine_type = await self._get_engine_with_fallback(
+            engine_type, request.language.value
+        )
+
         # Apply response config modifiers
         pace = request.pace
         pitch = request.pitch
@@ -183,33 +233,57 @@ class TTSService:
                 pace *= 0.85
             elif response_config.get("pace") == "fast":
                 pace *= 1.15
-            
+
             if response_config.get("pitch") == "low":
                 pitch *= 0.9
             elif response_config.get("pitch") == "high":
                 pitch *= 1.1
-        
-        # Synthesize
-        audio_bytes = await engine.synthesize(
-            text=request.text,
-            language=request.language.value,
-            emotion=emotion.value,
-            voice_id=request.voice_id,
-            pace=pace,
-            pitch=pitch,
-            dialect=request.dialect.value if request.dialect else None,
-            energy=request.energy
-        )
-        
+
+        # Synthesize — retry with fallback if synthesis itself fails
+        try:
+            audio_bytes = await engine.synthesize(
+                text=request.text,
+                language=request.language.value,
+                emotion=emotion.value,
+                voice_id=request.voice_id,
+                pace=pace,
+                pitch=pitch,
+                dialect=request.dialect.value if request.dialect else None,
+                energy=request.energy
+            )
+        except Exception as synth_err:
+            logger.warning("Synthesis failed on %s: %s — retrying with fallbacks", engine_type, synth_err)
+            # Try remaining engines
+            for fallback in self.ENGINE_FALLBACK_ORDER:
+                if fallback == engine_type:
+                    continue
+                try:
+                    fb_engine, engine_type = await self._get_engine_with_fallback(fallback, request.language.value)
+                    audio_bytes = await fb_engine.synthesize(
+                        text=request.text,
+                        language=request.language.value,
+                        emotion=emotion.value,
+                        voice_id=request.voice_id,
+                        pace=pace,
+                        pitch=pitch,
+                        dialect=request.dialect.value if request.dialect else None,
+                        energy=request.energy
+                    )
+                    break
+                except Exception:
+                    continue
+            else:
+                raise RuntimeError(f"All TTS engines failed. Last error: {synth_err}")
+
         # Calculate duration (rough estimate from bytes)
         # WAV: bytes / (sample_rate * channels * bytes_per_sample)
         duration = len(audio_bytes) / (request.sample_rate * 1 * 2)
-        
+
         latency = (time.time() - start_time) * 1000
-        
+
         # Encode to base64
         audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-        
+
         return TTSResponse(
             audio_base64=audio_base64,
             duration_seconds=duration,
@@ -232,8 +306,10 @@ class TTSService:
             language=request.language.value,
             prefer_low_latency=True
         )
-        
-        engine = await self._get_engine(engine_type)
+
+        engine, engine_type = await self._get_engine_with_fallback(
+            engine_type, request.language.value
+        )
         
         emotion = request.emotion or EmotionType.NEUTRAL
         

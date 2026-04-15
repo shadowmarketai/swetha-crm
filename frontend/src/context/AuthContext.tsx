@@ -124,12 +124,12 @@ export function TypedAuthProvider({ children }: AuthProviderProps): React.JSX.El
       // Restore demo session
       const demoUser: User = {
         id: 'demo-001',
-        full_name: 'VoiceFlow Admin',
-        name: 'VoiceFlow Admin',
-        email: 'admin@voiceflow.ai',
+        full_name: 'Swetha Admin',
+        name: 'Swetha Admin',
+        email: 'admin@swetha.in',
         role: 'admin',
         is_active: true,
-        company: 'ShadowMarket',
+        company: 'Swetha Structures',
         plan: 'pro',
         created_at: new Date().toISOString(),
       };
@@ -204,12 +204,12 @@ export function TypedAuthProvider({ children }: AuthProviderProps): React.JSX.El
   const demoLogin = useCallback((): User => {
     const demoUser: User = {
       id: 'demo-001',
-      full_name: 'VoiceFlow Admin',
-      name: 'VoiceFlow Admin',
-      email: 'admin@voiceflow.ai',
+      full_name: 'Swetha Admin',
+      name: 'Swetha Admin',
+      email: 'admin@swetha.in',
       role: 'admin',
       is_active: true,
-      company: 'ShadowMarket',
+      company: 'Swetha Structures',
       plan: 'pro',
       created_at: new Date().toISOString(),
     };

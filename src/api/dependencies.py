@@ -42,14 +42,13 @@ def get_db():
 
 
 def _decode_token(token: str) -> dict:
-    """Decode and validate a JWT token using PyJWT (KB-004)."""
+    """Decode, validate, and check revocation of a JWT token (KB-004)."""
     try:
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM],
         )
-        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -63,18 +62,47 @@ def _decode_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Check token revocation (jti blacklist)
+    jti = payload.get("jti")
+    if jti:
+        from api.services.auth_service import is_token_revoked
+        if is_token_revoked(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    return payload
+
 
 # ── Auth Admin Fallback (demo) ──────────────────────────────────
 
 
 def _get_admin_user() -> dict:
-    """Fetch admin user from DB; fallback to hardcoded demo user."""
+    """Fetch an admin user from the DB for the demo token.
+
+    Order of preference:
+      1. The canonical ``admin@shadowmarket.ai`` row (if it exists)
+      2. Any user with role='admin' or 'superadmin'
+      3. The first user in the table
+      4. A hardcoded demo dict (only reached on a totally empty DB)
+    """
     try:
         with db() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE email=?",
                 ("admin@shadowmarket.ai",),
             ).fetchone()
+            if row:
+                return dict(row)
+            row = conn.execute(
+                "SELECT * FROM users WHERE role IN ('admin','superadmin') "
+                "ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row:
+                return dict(row)
+            row = conn.execute("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
             if row:
                 return dict(row)
     except Exception:
@@ -109,9 +137,15 @@ async def get_current_user(
 
     token = credentials.credentials
 
-    # Allow demo token in development
+    # Allow demo token ONLY when DEMO_MODE=true (never in production)
     if token == "demo-token-123":
-        return _get_admin_user()
+        import os
+        if os.getenv("DEMO_MODE", "").lower() in ("true", "1", "yes"):
+            return _get_admin_user()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Demo mode is disabled",
+        )
 
     payload = _decode_token(token)
     email: str = payload.get("sub", "")

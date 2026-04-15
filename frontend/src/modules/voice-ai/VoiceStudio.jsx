@@ -2,18 +2,19 @@
  * Voice Studio - Train and customize dialect-aware AI voices
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
   Mic, Play, Settings, Upload, Volume2, Sliders, Sparkles,
   Languages, Brain, AudioWaveform, Music, User, UserCircle,
   CheckCircle, UploadCloud, FileAudio, RotateCcw, Save,
-  ChevronDown, ToggleLeft, ToggleRight, Palette
+  ChevronDown, ToggleLeft, ToggleRight, Palette, Loader2, Square
 } from 'lucide-react';
 import CollapsibleSection from './components/CollapsibleSection';
 import DialectBadge from './components/DialectBadge';
 import EmotionIndicator from './components/EmotionIndicator';
 import GenZBadge from './components/GenZBadge';
+import { ttsAPI } from '../../services/api';
 
 const VOICE_MODELS = [
   { id: 'kongu-m', name: 'Kongu Tamil Male', dialect: 'Kongu', language: 'Tamil', accent: 'Western Tamil', gender: 'male', borderColor: 'border-orange-500', bgHover: 'hover:bg-orange-50 dark:hover:bg-orange-900/10', activeBg: 'bg-orange-50 dark:bg-orange-900/20' },
@@ -38,6 +39,43 @@ const EMOTIONS = [
 const DIALECTS = ['Kongu', 'Chennai', 'Madurai', 'Tirunelveli'];
 const LANGUAGES = ['Tamil', 'Hindi', 'English', 'Tamil-English Mix', 'Hindi-English Mix'];
 
+const DIALECT_TO_LANG = { Kongu: 'ta', Chennai: 'ta', Madurai: 'ta', Tirunelveli: 'ta' };
+
+const LANG_TO_BCP47 = { ta: 'ta-IN', hi: 'hi-IN', en: 'en-IN', te: 'te-IN', kn: 'kn-IN', ml: 'ml-IN' };
+
+const SAMPLE_TEXTS = {
+  Kongu: 'Vanakkam! Enga Kongu nattu le irunthu pesuren.',
+  Chennai: 'Vanakkam! Chennai le irunthu pesuren.',
+  Madurai: 'Vanakkam! Madurai le irunthu pesuren.',
+  Tirunelveli: 'Vanakkam! Tirunelveli le irunthu pesuren.',
+};
+
+/**
+ * Speak text using the browser's built-in SpeechSynthesis API.
+ * Returns a Promise that resolves when speech ends.
+ */
+function browserSpeak(text, { lang = 'en-IN', rate = 1.0, pitch = 1.0, onStart, onEnd } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!window.speechSynthesis) {
+      reject(new Error('Browser speech synthesis not supported'));
+      return;
+    }
+    window.speechSynthesis.cancel(); // stop any ongoing speech
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang;
+    utter.rate = Math.max(0.1, Math.min(rate, 10));
+    utter.pitch = Math.max(0, Math.min(pitch, 2));
+    // Try to pick a voice that matches the language
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find(v => v.lang === lang) || voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+    if (match) utter.voice = match;
+    utter.onstart = () => onStart?.();
+    utter.onend = () => { onEnd?.(); resolve(); };
+    utter.onerror = (e) => { onEnd?.(); reject(e); };
+    window.speechSynthesis.speak(utter);
+  });
+}
+
 export default function VoiceStudioPage() {
   const [selectedModel, setSelectedModel] = useState('kongu-m');
   const [speakingSpeed, setSpeakingSpeed] = useState(1.0);
@@ -54,6 +92,14 @@ export default function VoiceStudioPage() {
   const [speechEmotion, setSpeechEmotion] = useState('neutral');
   const [speechGenZ, setSpeechGenZ] = useState(false);
 
+  // TTS playback state
+  const [generatedAudio, setGeneratedAudio] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(null); // model id being previewed
+  const [lastResult, setLastResult] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef(null);
+
   // Training state
   const [trainingDialect, setTrainingDialect] = useState('Kongu');
   const [trainingLanguage, setTrainingLanguage] = useState('Tamil');
@@ -68,16 +114,107 @@ export default function VoiceStudioPage() {
     toast.success('Voice settings saved successfully');
   };
 
-  const handlePreviewVoice = (model) => {
-    toast('Playing preview for ' + model.name + '...', { icon: '\u{1F50A}' });
+  const playAudioFromBase64 = (base64, format = 'wav') => {
+    const audioUrl = `data:audio/${format};base64,${base64}`;
+    setGeneratedAudio(audioUrl);
+    if (audioRef.current) {
+      audioRef.current.src = audioUrl;
+      audioRef.current.play().catch(() => {});
+      setIsPlaying(true);
+    }
   };
 
-  const handleGenerateSpeech = () => {
+  const handlePreviewVoice = async (model) => {
+    setIsPreviewing(model.id);
+    const sampleText = SAMPLE_TEXTS[model.dialect] || 'Vanakkam! This is a voice preview.';
+    const lang = DIALECT_TO_LANG[model.dialect] || 'ta';
+
+    // Try backend TTS API first
+    try {
+      const { data } = await ttsAPI.synthesize({
+        text: sampleText,
+        language: lang,
+        dialect: model.dialect.toLowerCase(),
+        emotion: 'neutral',
+        pace: speakingSpeed,
+        pitch: 1.0 + (pitch / 100),
+      });
+      const engine = data.tts_engine || data.engine_used || 'TTS';
+      const latency = data.duration_ms || data.latency_ms || 0;
+      setLastResult({ engine_used: engine, latency_ms: latency });
+      playAudioFromBase64(data.audio_base64, data.format || data.audio_format || 'wav');
+      toast.success(`Preview: ${model.name} (${engine})`);
+      setIsPreviewing(null);
+      return;
+    } catch (_apiErr) {
+      // API unavailable — fall through to browser TTS
+    }
+
+    // Fallback: browser speech synthesis
+    try {
+      setLastResult({ engine_used: 'Browser TTS', latency_ms: 0 });
+      setGeneratedAudio(null); // no audio element for browser TTS
+      await browserSpeak(sampleText, {
+        lang: LANG_TO_BCP47[lang] || 'en-IN',
+        rate: speakingSpeed,
+        pitch: Math.max(0, Math.min(1.0 + (pitch / 100), 2)),
+        onStart: () => setIsPlaying(true),
+        onEnd: () => setIsPlaying(false),
+      });
+      toast.success(`Preview: ${model.name} (Browser TTS)`);
+    } catch (err) {
+      toast.error('Preview failed — no TTS engine available');
+    } finally {
+      setIsPreviewing(null);
+    }
+  };
+
+  const handleGenerateSpeech = async () => {
     if (!speechText.trim()) {
       toast.error('Please enter text to generate speech');
       return;
     }
-    toast.success('Generating speech with ' + speechDialect + ' dialect (' + speechEmotion + ')...');
+    setIsGenerating(true);
+    const lang = DIALECT_TO_LANG[speechDialect] || 'ta';
+
+    // Try backend TTS API first
+    try {
+      const { data } = await ttsAPI.synthesize({
+        text: speechText,
+        language: lang,
+        dialect: speechDialect.toLowerCase(),
+        emotion: speechEmotion,
+        pace: speakingSpeed,
+        pitch: 1.0 + (pitch / 100),
+      });
+      const engine = data.tts_engine || data.engine_used || 'TTS';
+      const latency = data.duration_ms || data.latency_ms || 0;
+      setLastResult({ engine_used: engine, latency_ms: latency });
+      playAudioFromBase64(data.audio_base64, data.format || data.audio_format || 'wav');
+      toast.success(`Generated using ${engine}`);
+      setIsGenerating(false);
+      return;
+    } catch (_apiErr) {
+      // API unavailable — fall through to browser TTS
+    }
+
+    // Fallback: browser speech synthesis
+    try {
+      setLastResult({ engine_used: 'Browser TTS', latency_ms: 0 });
+      setGeneratedAudio(null);
+      await browserSpeak(speechText, {
+        lang: LANG_TO_BCP47[lang] || 'en-IN',
+        rate: speakingSpeed,
+        pitch: Math.max(0, Math.min(1.0 + (pitch / 100), 2)),
+        onStart: () => setIsPlaying(true),
+        onEnd: () => setIsPlaying(false),
+      });
+      toast.success('Generated using Browser TTS (backend unavailable)');
+    } catch (err) {
+      toast.error('Speech generation failed — no TTS engine available');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleDrop = (e) => {
@@ -189,9 +326,14 @@ export default function VoiceStudioPage() {
                         e.stopPropagation();
                         handlePreviewVoice(model);
                       }}
-                      className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                      disabled={isPreviewing === model.id}
+                      className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
                     >
-                      <Play className="w-3.5 h-3.5" /> Preview
+                      {isPreviewing === model.id ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</>
+                      ) : (
+                        <><Play className="w-3.5 h-3.5" /> Preview</>
+                      )}
                     </button>
                   </div>
                 );
@@ -399,12 +541,72 @@ export default function VoiceStudioPage() {
             {/* Generate Button */}
             <button
               onClick={handleGenerateSpeech}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-500/25"
+              disabled={isGenerating}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Volume2 className="w-5 h-5" /> Generate Speech
+              {isGenerating ? (
+                <><Loader2 className="w-5 h-5 animate-spin" /> Generating...</>
+              ) : (
+                <><Volume2 className="w-5 h-5" /> Generate Speech</>
+              )}
             </button>
           </div>
         </div>
+
+        {/* Audio Player */}
+        {(generatedAudio || lastResult) && (
+          <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+            {generatedAudio ? (
+              <div className="flex items-center gap-3 mb-3">
+                <button
+                  onClick={() => {
+                    if (!audioRef.current) return;
+                    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
+                    else { audioRef.current.play().catch(() => {}); setIsPlaying(true); }
+                  }}
+                  className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 transition-colors flex-shrink-0"
+                >
+                  {isPlaying ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+                </button>
+                <div className="flex-1">
+                  <audio
+                    ref={audioRef}
+                    src={generatedAudio}
+                    onEnded={() => setIsPlaying(false)}
+                    onPause={() => setIsPlaying(false)}
+                    onPlay={() => setIsPlaying(true)}
+                    controls
+                    className="w-full h-8"
+                  />
+                </div>
+              </div>
+            ) : isPlaying ? (
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
+                  <Volume2 className="w-4 h-4 animate-pulse" />
+                </div>
+                <div className="flex-1">
+                  <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Playing via browser speech synthesis...</p>
+                </div>
+                <button
+                  onClick={() => { window.speechSynthesis.cancel(); setIsPlaying(false); }}
+                  className="px-3 py-1.5 text-xs font-medium bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                >
+                  Stop
+                </button>
+              </div>
+            ) : null}
+            {lastResult && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Engine: <span className="font-medium">{lastResult.engine_used}</span>
+                {lastResult.latency_ms > 0 && <> | Latency: <span className="font-medium">{Math.round(lastResult.latency_ms)}ms</span></>}
+              </p>
+            )}
+          </div>
+        )}
       </CollapsibleSection>
 
       {/* Train Custom Voice Section */}

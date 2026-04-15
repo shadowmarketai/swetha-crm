@@ -5,19 +5,13 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, Filter
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { voiceAgentAPI } from '../../services/api';
 import Timeline from './components/Timeline';
 import CallDetailPanel from './components/CallDetailPanel';
 import ResizablePanel from './components/ResizablePanel';
 import DialectBadge from './components/DialectBadge';
 import EmotionIndicator from './components/EmotionIndicator';
 import GenZBadge from './components/GenZBadge';
-
-// React Query hooks — real API with mock fallback
-let useVoiceAnalyses;
-try {
-  const api = require('../../hooks/api');
-  useVoiceAnalyses = api.useVoiceAnalyses;
-} catch { /* hooks not available */ }
 
 // ── Mock Data ────────────────────────────────────────────────────────────────
 const mockCalls = [
@@ -173,10 +167,49 @@ export default function CallLogsPage() {
   const [sortField, setSortField] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
   const [currentPage, setCurrentPage] = useState(1);
+  const [apiCalls, setApiCalls] = useState([]);
+
+  // Load call recordings from API
+  useEffect(() => {
+    let cancelled = false;
+    voiceAgentAPI.listRecordings(undefined, 200)
+      .then(({ data }) => {
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
+        const mapped = data.map(r => ({
+          id: `api-${r.id}`,
+          name: r.caller_number || `Call #${r.id}`,
+          phone: r.caller_number || '',
+          duration: r.duration_seconds ? `${Math.floor(r.duration_seconds / 60)}:${String(r.duration_seconds % 60).padStart(2, '0')}` : '0:00',
+          agent: r.agent_voice_id || 'AI Agent',
+          outcome: r.post_call_analysis?.outcome || 'Completed',
+          sentiment: r.post_call_analysis?.sentiment || 'neutral',
+          time: r.created_at ? new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          date: r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '',
+          direction: r.direction || 'outbound',
+          dialect: r.post_call_analysis?.dialect || 'Chennai',
+          dialectConfidence: r.post_call_analysis?.dialect_confidence || 0.7,
+          dialectPatterns: [],
+          language: r.language || 'Tamil',
+          emotion: r.post_call_analysis?.emotion || 'neutral',
+          emotionConfidence: r.post_call_analysis?.emotion_confidence || 0.5,
+          emotionTrend: ['neutral'],
+          genZScore: 0,
+          genZTerms: [],
+          codeMixLanguages: '',
+          codeMixRatio: 0,
+          transcript: r.transcript || [],
+        }));
+        setApiCalls(mapped);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const allCalls = useMemo(() => [...apiCalls, ...mockCalls], [apiCalls]);
 
   // ── Filtering ────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let result = [...mockCalls];
+    let result = [...allCalls];
 
     // search filter
     if (search.trim()) {

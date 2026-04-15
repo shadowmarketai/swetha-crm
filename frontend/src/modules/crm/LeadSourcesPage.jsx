@@ -1,45 +1,39 @@
 /**
- * Lead Sources Integration Page
+ * Lead Sources Integration Page — Tendent
  * Configure IndiaMart, JustDial, and Facebook Lead Ads integrations.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { integrationsAPI } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import {
-  Settings, RefreshCw, Check, X, ExternalLink, Copy, Shield, Activity,
-  TrendingUp, AlertCircle, Loader2
+  Settings, RefreshCw, Check, ExternalLink, Copy, AlertCircle, Loader2,
+  ChevronDown, Globe,
 } from 'lucide-react';
-
-// Mock fallback data for when API is unavailable
-const MOCK_CONFIGS = [];
-const MOCK_STATS = [
-  { source: 'indiamart', total: 0, today: 0, this_week: 0, this_month: 0 },
-  { source: 'justdial', total: 0, today: 0, this_week: 0, this_month: 0 },
-  { source: 'facebook_leads', total: 0, today: 0, this_week: 0, this_month: 0 },
-];
+import {
+  Card, Stat, Button, Input, Field, PageHeader, Badge, Skeleton, EmptyState,
+} from '../../components/ui/primitives';
 
 const SOURCES = [
   {
     provider: 'indiamart',
     name: 'IndiaMart',
     description: 'B2B marketplace lead capture via CRM API polling',
-    color: 'bg-blue-500',
-    textColor: 'text-blue-600',
-    bgLight: 'bg-blue-50 dark:bg-blue-900/20',
+    gradient: 'from-sky-500 to-blue-600',
+    tint: 'rgba(56,189,248,0.08)',
     fields: [
       { key: 'api_key', label: 'CRM API Key', placeholder: 'Your IndiaMart CRM API Key', type: 'password' },
     ],
     webhookUrl: null,
-    helpText: 'Get your CRM API key from IndiaMart seller dashboard → Lead Manager → API Settings',
+    helpText: 'Get your CRM API key from IndiaMart seller dashboard \u2192 Lead Manager \u2192 API Settings',
   },
   {
     provider: 'justdial',
     name: 'JustDial',
     description: 'Local business listing leads via webhook',
-    color: 'bg-orange-500',
-    textColor: 'text-orange-600',
-    bgLight: 'bg-orange-50 dark:bg-orange-900/20',
+    gradient: 'from-orange-500 to-amber-600',
+    tint: 'rgba(251,146,60,0.08)',
     fields: [
       { key: 'api_key', label: 'Webhook API Key', placeholder: 'Generate a key for JustDial to use', type: 'text' },
     ],
@@ -50,24 +44,23 @@ const SOURCES = [
     provider: 'facebook_leads',
     name: 'Facebook Lead Ads',
     description: 'Meta lead form submissions via Graph API webhook',
-    color: 'bg-indigo-500',
-    textColor: 'text-indigo-600',
-    bgLight: 'bg-indigo-50 dark:bg-indigo-900/20',
+    gradient: 'from-indigo-500 to-violet-600',
+    tint: 'rgba(99,102,241,0.08)',
     fields: [
       { key: 'api_key', label: 'Page Access Token', placeholder: 'Meta Page Access Token', type: 'password' },
       { key: 'page_id', label: 'Facebook Page ID', placeholder: 'e.g. 123456789', type: 'text' },
       { key: 'app_secret', label: 'App Secret (for HMAC)', placeholder: 'Meta App Secret', type: 'password' },
     ],
     webhookUrl: '/api/v1/lead-sources/facebook/webhook',
-    helpText: 'Configure the webhook URL in Meta Developer Console → Webhooks → Lead Ads',
+    helpText: 'Configure the webhook URL in Meta Developer Console \u2192 Webhooks \u2192 Lead Ads',
   },
 ];
 
-function StatBadge({ label, value }) {
+function MiniStat({ label, value }) {
   return (
     <div className="text-center">
-      <p className="text-lg font-bold text-slate-900 dark:text-white">{value}</p>
-      <p className="text-xs text-slate-500">{label}</p>
+      <div className="text-lg font-bold text-slate-900 dark:text-white tabular-nums">{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
     </div>
   );
 }
@@ -78,7 +71,7 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
   const [expanded, setExpanded] = useState(false);
   const [formData, setFormData] = useState(() => {
     const initial = { is_active: config?.is_active ?? true, auto_assign: false, default_tags: '' };
-    source.fields.forEach(f => { initial[f.key] = ''; });
+    source.fields.forEach((f) => { initial[f.key] = ''; });
     if (config?.page_id) initial.page_id = config.page_id;
     return initial;
   });
@@ -89,12 +82,11 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
   const handleSave = () => {
     const payload = { provider: source.provider, ...formData };
     if (payload.default_tags && typeof payload.default_tags === 'string') {
-      payload.default_tags = payload.default_tags.split(',').map(t => t.trim()).filter(Boolean);
+      payload.default_tags = payload.default_tags.split(',').map((t) => t.trim()).filter(Boolean);
     } else {
       delete payload.default_tags;
     }
-    // Remove empty string fields
-    Object.keys(payload).forEach(k => {
+    Object.keys(payload).forEach((k) => {
       if (payload[k] === '') delete payload[k];
     });
     onSave(payload);
@@ -108,54 +100,59 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-      {/* Header */}
-      <div className="p-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg ${source.color} flex items-center justify-center`}>
-            <ExternalLink className="w-5 h-5 text-white" />
+    <Card className="overflow-hidden">
+      {/* Header row */}
+      <div className="p-5 flex items-center justify-between gap-4 relative">
+        <div
+          className="absolute inset-0 pointer-events-none opacity-80"
+          style={{ background: source.tint }}
+        />
+        <div className="relative flex items-center gap-3 min-w-0">
+          <div
+            className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${source.gradient} flex items-center justify-center shadow-lg flex-shrink-0`}
+            style={{ boxShadow: `0 10px 24px -8px rgba(0,0,0,0.2)` }}
+          >
+            <ExternalLink className="w-5 h-5 text-white" strokeWidth={2.6} />
           </div>
-          <div>
-            <h3 className="font-semibold text-slate-900 dark:text-white">{source.name}</h3>
-            <p className="text-xs text-slate-500">{source.description}</p>
+          <div className="min-w-0">
+            <h3 className="font-bold text-slate-900 dark:text-white text-base truncate">{source.name}</h3>
+            <p className="text-xs text-slate-500 truncate">{source.description}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2 flex-shrink-0">
           {isConfigured ? (
-            <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-              <Check className="w-3 h-3" /> Connected
-            </span>
+            <Badge tone="success" dot>Connected</Badge>
           ) : (
-            <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
-              Not configured
-            </span>
+            <Badge>Not configured</Badge>
           )}
           <button
+            type="button"
             onClick={() => setExpanded(!expanded)}
-            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500"
+            className="p-2 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-all"
+            aria-label="Toggle configuration"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className={`w-4 h-4 transition-transform duration-300 ${expanded ? 'rotate-90' : ''}`} />
           </button>
         </div>
       </div>
 
       {/* Stats row */}
       {stats && (
-        <div className={`px-5 py-3 ${source.bgLight} border-t border-slate-100 dark:border-slate-700 grid grid-cols-4 gap-4`}>
-          <StatBadge label="Total" value={stats.total} />
-          <StatBadge label="Today" value={stats.today} />
-          <StatBadge label="This Week" value={stats.this_week} />
-          <StatBadge label="This Month" value={stats.this_month} />
+        <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-4 gap-4 bg-slate-50/60 dark:bg-slate-900/40">
+          <MiniStat label="Total" value={stats.total} />
+          <MiniStat label="Today" value={stats.today} />
+          <MiniStat label="Week" value={stats.this_week} />
+          <MiniStat label="Month" value={stats.this_month} />
         </div>
       )}
 
       {/* Config sync info */}
       {isConfigured && (
-        <div className="px-5 py-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between text-xs text-slate-500">
+        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 text-xs text-slate-500 flex-wrap">
           <div className="flex items-center gap-4">
-            <span>Ingested: <strong className="text-slate-700 dark:text-slate-300">{config.total_ingested}</strong></span>
-            <span>Duplicates: <strong>{config.total_duplicates}</strong></span>
-            <span>Errors: <strong className={config.total_errors > 0 ? 'text-red-500' : ''}>{config.total_errors}</strong></span>
+            <span>Ingested <strong className="text-slate-700 dark:text-slate-300">{config.total_ingested}</strong></span>
+            <span>Duplicates <strong>{config.total_duplicates}</strong></span>
+            <span>Errors <strong className={config.total_errors > 0 ? 'text-rose-500' : ''}>{config.total_errors}</strong></span>
           </div>
           {config.last_sync_at && (
             <span>Last sync: {new Date(config.last_sync_at).toLocaleString()}</span>
@@ -165,188 +162,206 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
 
       {/* Sync button for IndiaMart */}
       {isConfigured && source.provider === 'indiamart' && canWrite && (
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700">
-          <button
-            onClick={onSync}
-            disabled={isSyncing}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
-          >
-            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800">
+          <Button onClick={onSync} loading={isSyncing} leftIcon={RefreshCw}>
             {isSyncing ? 'Syncing...' : 'Sync Now'}
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Expanded config form */}
       {expanded && (
-        <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
-          {/* Webhook URL display */}
+        <div className="px-5 py-5 border-t border-slate-100 dark:border-slate-800 space-y-4 bg-white/60 dark:bg-slate-900/40">
           {source.webhookUrl && (
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Webhook URL</label>
+            <Field label="Webhook URL" hint="Share this URL with the provider">
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-xs text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 truncate">
+                <code className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-xs text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 truncate font-mono">
                   {baseUrl}{source.webhookUrl}
                 </code>
-                <button onClick={copyWebhookUrl} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
-                  <Copy className="w-4 h-4 text-slate-500" />
-                </button>
+                <Button variant="secondary" size="icon" onClick={copyWebhookUrl}>
+                  <Copy className="w-4 h-4" />
+                </Button>
               </div>
-            </div>
+            </Field>
           )}
 
-          {/* Dynamic fields */}
-          {source.fields.map(field => (
-            <div key={field.key}>
-              <label className="block text-xs font-medium text-slate-500 mb-1">{field.label}</label>
-              <input
+          {source.fields.map((field) => (
+            <Field key={field.key} label={field.label}>
+              <Input
                 type={field.type}
                 placeholder={field.placeholder}
                 value={formData[field.key] || ''}
-                onChange={e => setFormData(prev => ({ ...prev, [field.key]: e.target.value }))}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm"
+                onChange={(e) => setFormData((prev) => ({ ...prev, [field.key]: e.target.value }))}
               />
-            </div>
+            </Field>
           ))}
 
-          {/* Active toggle */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-700 dark:text-slate-300">Active</span>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800">
+            <div>
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">Active</div>
+              <div className="text-xs text-slate-500">Enable lead ingestion for this source</div>
+            </div>
             <button
-              onClick={() => setFormData(prev => ({ ...prev, is_active: !prev.is_active }))}
-              className={`w-10 h-6 rounded-full transition-colors ${formData.is_active ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+              type="button"
+              onClick={() => setFormData((prev) => ({ ...prev, is_active: !prev.is_active }))}
+              className={`relative w-11 h-6 rounded-full transition-all ${
+                formData.is_active
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 shadow-[0_4px_12px_-2px_rgba(16,185,129,0.5)]'
+                  : 'bg-slate-300 dark:bg-slate-700'
+              }`}
             >
-              <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform mx-1 mt-1 ${formData.is_active ? 'translate-x-4' : ''}`} />
+              <div
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transform transition-transform ${
+                  formData.is_active ? 'translate-x-5' : ''
+                }`}
+              />
             </button>
           </div>
 
-          {/* Default tags */}
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Default Tags (comma-separated)</label>
-            <input
+          <Field label="Default Tags" hint="Comma-separated tags applied to ingested leads">
+            <Input
               type="text"
               placeholder="e.g. indiamart, hot-lead"
               value={formData.default_tags || ''}
-              onChange={e => setFormData(prev => ({ ...prev, default_tags: e.target.value }))}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm"
+              onChange={(e) => setFormData((prev) => ({ ...prev, default_tags: e.target.value }))}
             />
+          </Field>
+
+          <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200/60 dark:border-amber-800/40">
+            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">{source.helpText}</p>
           </div>
 
-          {/* Help text */}
-          <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-            <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-amber-700 dark:text-amber-400">{source.helpText}</p>
-          </div>
-
-          {/* Save button */}
           {canWrite && (
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
-            >
+            <Button onClick={handleSave} disabled={isSaving} className="w-full" size="lg">
               {isSaving ? 'Saving...' : isConfigured ? 'Update Configuration' : 'Save Configuration'}
-            </button>
+            </Button>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
 export default function LeadSourcesPage() {
-  // Try to use real hooks, fall back to mock data
-  let configs = MOCK_CONFIGS;
-  let stats = MOCK_STATS;
-  let createConfig = null;
-  let pollIndiamart = null;
-  let isSaving = false;
-  let isSyncing = false;
+  const [configs, setConfigs] = useState([]);
+  const [stats, setStats] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  try {
-    const { useLeadSourceConfigs, useLeadSourceStats, useCreateLeadSourceConfig, usePollIndiamart } = require('../../hooks/api');
-    const configsQuery = useLeadSourceConfigs();
-    const statsQuery = useLeadSourceStats();
-    const createMutation = useCreateLeadSourceConfig();
-    const pollMutation = usePollIndiamart();
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await integrationsAPI.getAll();
+      const data = Array.isArray(res.data) ? res.data : res.data?.configs || [];
+      setConfigs(data);
+      // If the API returns stats alongside configs, use them
+      if (res.data?.stats) {
+        setStats(Array.isArray(res.data.stats) ? res.data.stats : []);
+      }
+    } catch {
+      toast.error('Failed to load lead source configurations');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    if (configsQuery.data) configs = configsQuery.data;
-    if (statsQuery.data) stats = statsQuery.data;
-    createConfig = createMutation.mutateAsync;
-    pollIndiamart = pollMutation.mutateAsync;
-    isSaving = createMutation.isPending;
-    isSyncing = pollMutation.isPending;
-  } catch {
-    // Hooks not available, use mock data
-  }
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleSave = async (payload) => {
+    setIsSaving(true);
     try {
-      if (createConfig) {
-        await createConfig(payload);
-        toast.success(`${payload.provider} configuration saved!`);
-      } else {
-        toast.success(`${payload.provider} configuration saved (demo mode)`);
-      }
-    } catch (err) {
-      toast.error('Failed to save configuration');
+      await integrationsAPI.connect(payload.provider, payload);
+      toast.success(`${payload.provider} configuration saved!`);
+      fetchData();
+    } catch {
+      toast.error(`Failed to save ${payload.provider} configuration`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleSync = async () => {
+    setIsSyncing(true);
     try {
-      if (pollIndiamart) {
-        const result = await pollIndiamart();
-        toast.success(`Sync complete: ${result.ingested} new leads, ${result.duplicates} duplicates`);
-      } else {
-        toast.success('Sync triggered (demo mode)');
-      }
-    } catch (err) {
+      const result = await integrationsAPI.sync('indiamart');
+      toast.success(`Sync complete: ${result.data?.ingested || 0} new leads`);
+      fetchData();
+    } catch {
       toast.error('Sync failed');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
-  const getConfigForProvider = (provider) => configs.find(c => c.provider === provider);
-  const getStatsForProvider = (provider) => stats.find(s => s.source === provider);
+  const getConfigForProvider = (provider) => configs.find((c) => c.provider === provider);
+  const getStatsForProvider = (provider) => stats.find((s) => s.source === provider);
 
-  const totalLeads = stats.reduce((sum, s) => sum + s.total, 0);
-  const todayLeads = stats.reduce((sum, s) => sum + s.today, 0);
+  const totalLeads = stats.reduce((sum, s) => sum + (s.total || 0), 0);
+  const todayLeads = stats.reduce((sum, s) => sum + (s.today || 0), 0);
+  const weekLeads = stats.reduce((sum, s) => sum + (s.this_week || 0), 0);
+  const connected = configs.length;
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-48" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
+        </div>
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-xl" />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lead Sources</h1>
-          <p className="text-sm text-slate-500 mt-1">Configure IndiaMart, JustDial, and Facebook Lead Ads integrations</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalLeads}</p>
-            <p className="text-xs text-slate-500">Total Leads</p>
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-bold text-green-600">{todayLeads}</p>
-            <p className="text-xs text-slate-500">Today</p>
-          </div>
-        </div>
+      <PageHeader
+        title="Lead Sources"
+        subtitle="Configure IndiaMart, JustDial, and Facebook Lead Ads to automatically capture leads"
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Stat label="Total Leads" value={totalLeads.toLocaleString()} icon={Globe} accent="#6366f1" accentTo="#8b5cf6" />
+        <Stat label="Today" value={todayLeads} icon={RefreshCw} accent="#10b981" accentTo="#06b6d4" />
+        <Stat label="This Week" value={weekLeads} icon={ExternalLink} accent="#f59e0b" accentTo="#f43f5e" />
+        <Stat label="Connected Sources" value={`${connected}/${SOURCES.length}`} icon={Check} accent="#ec4899" accentTo="#8b5cf6" />
       </div>
 
-      {/* Source Cards */}
-      <div className="space-y-4">
-        {SOURCES.map(source => (
-          <SourceCard
-            key={source.provider}
-            source={source}
-            config={getConfigForProvider(source.provider)}
-            stats={getStatsForProvider(source.provider)}
-            onSave={handleSave}
-            onSync={handleSync}
-            isSaving={isSaving}
-            isSyncing={isSyncing}
-          />
-        ))}
-      </div>
+      {configs.length === 0 && stats.length === 0 ? (
+        <div className="space-y-4">
+          {SOURCES.map((source) => (
+            <SourceCard
+              key={source.provider}
+              source={source}
+              config={null}
+              stats={null}
+              onSave={handleSave}
+              onSync={handleSync}
+              isSaving={isSaving}
+              isSyncing={isSyncing}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {SOURCES.map((source) => (
+            <SourceCard
+              key={source.provider}
+              source={source}
+              config={getConfigForProvider(source.provider)}
+              stats={getStatsForProvider(source.provider)}
+              onSave={handleSave}
+              onSync={handleSync}
+              isSaving={isSaving}
+              isSyncing={isSyncing}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

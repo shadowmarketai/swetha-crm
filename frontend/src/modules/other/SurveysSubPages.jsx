@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { surveysAPI } from '../../services/api';
 import {
   FileText, Plus, Edit, Trash2, Copy, ChevronDown, ChevronUp, CheckCircle,
   Clock, Search
@@ -15,20 +16,43 @@ export function FormsPage() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', type: 'feedback' });
 
-  const forms = [
-    { id: 1, name: 'Customer Satisfaction Survey', responses: 456, status: 'active', created: '2026-01-15', fields: 8 },
-    { id: 2, name: 'Product Feedback Form', responses: 234, status: 'active', created: '2026-01-20', fields: 12 },
-    { id: 3, name: 'Post-Call Survey', responses: 892, status: 'active', created: '2026-02-01', fields: 5 },
-    { id: 4, name: 'Event Registration', responses: 67, status: 'draft', created: '2026-02-10', fields: 10 },
-    { id: 5, name: 'NPS Survey', responses: 345, status: 'active', created: '2026-02-12', fields: 3 },
-    { id: 6, name: 'Employee Feedback', responses: 0, status: 'draft', created: '2026-02-20', fields: 15 },
-  ];
+  const [forms, setForms] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleCreate = () => {
+  const fetchForms = () => {
+    setLoading(true);
+    surveysAPI.getAll().then(res => {
+      const data = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.surveys || [];
+      setForms(data.map(s => ({
+        id: s.id,
+        name: s.name || s.title || 'Untitled',
+        responses: s.responses || s.response_count || 0,
+        status: s.status || 'draft',
+        created: s.created_at ? s.created_at.split('T')[0] : '-',
+        fields: s.fields || s.field_count || (s.questions?.length) || 0,
+      })));
+    }).catch(() => {
+      toast.error('Failed to load surveys');
+    }).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchForms(); }, []);
+
+  const [creating, setCreating] = useState(false);
+  const handleCreate = async () => {
     if (!form.name.trim()) { toast.error('Form name required'); return; }
-    toast.success(`Form "${form.name}" created`);
-    setForm({ name: '', type: 'feedback' });
-    setShowModal(false);
+    setCreating(true);
+    try {
+      await surveysAPI.create({ title: form.name, description: form.type, status: 'draft', questions: [] });
+      toast.success(`Form "${form.name}" created`);
+      setForm({ name: '', type: 'feedback' });
+      setShowModal(false);
+      fetchForms();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to create survey');
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (

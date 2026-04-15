@@ -1,5 +1,5 @@
 /**
- * Core TypeScript Interfaces for VoiceFlow Marketing AI
+ * Core TypeScript Interfaces for Swetha Structures CRM
  *
  * KB-008: NO 'any' type — every field is explicitly typed.
  * These interfaces match the FastAPI backend Pydantic models.
@@ -515,6 +515,154 @@ export interface LeadSourceStats {
   today: number;
   this_week: number;
   this_month: number;
+}
+
+// ─────────────────────────────────────────────
+// Voice Agent (Cloned Voices, Knowledge, Recordings)
+// ─────────────────────────────────────────────
+
+export interface ClonedVoice {
+  id: number;
+  tenant_id: string;
+  name: string;
+  person_name: string | null;
+  reference_audio_path: string;
+  reference_duration_seconds: number;
+  tts_engine: string;
+  internal_voice_id: string | null;
+  language: string;
+  status: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface KnowledgeDocument {
+  id: number;
+  tenant_id: string;
+  agent_id: string | null;
+  title: string;
+  doc_type: string;
+  content: string;
+  question: string | null;
+  answer: string | null;
+  chunk_index: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface AgentRecording {
+  id: number;
+  call_id: string;
+  caller_number: string;
+  agent_voice_id: string | null;
+  sip_provider: string;
+  recording_path: string | null;
+  recording_size_bytes: number;
+  audio_format: string;
+  duration_seconds: number;
+  sample_rate: number;
+  full_transcript: string | null;
+  transcript_json: Record<string, unknown> | null;
+  caller_emotion: string | null;
+  caller_intent: string | null;
+  caller_sentiment: number | null;
+  lead_score: number | null;
+  tenant_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface RecordingStats {
+  total_recordings: number;
+  total_duration_seconds: number;
+  avg_duration_seconds: number;
+  avg_sentiment: number | null;
+  avg_lead_score: number | null;
+  emotion_distribution: Record<string, number>;
+  intent_distribution: Record<string, number>;
+}
+
+// ─────────────────────────────────────────────
+// PEB Quotation
+// ─────────────────────────────────────────────
+
+export interface Quotation {
+  id: number;
+  lead_id: number;
+  user_id: number;
+  project_name: string;
+  client_name?: string;
+  client_location?: string;
+  building_params?: PEBInput;
+  boq_results?: BOQResult;
+  total_amount: number;
+  rate_per_sqft: number;
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'revised';
+  revision: number;
+  parent_quotation_id?: number;
+  pdf_path?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface PEBInput {
+  building_length: number;
+  building_width: number;
+  full_height: number;
+  wall_height: number;
+  cladding_height: number;
+  roof_type: 'gable' | 'single_slope';
+  roof_sheet_type: 'bare' | 'puf';
+  side_cladding_type: 'bare' | 'puf';
+  mezzanine_required: boolean;
+  mezz_length?: number;
+  mezz_width?: number;
+  lighting_sqft?: number;
+  steel_rate_main?: number;
+  steel_rate_mezz?: number;
+}
+
+export interface BOQItem {
+  item_no: string;
+  description: string;
+  unit: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  category: string;
+  sub_note?: string;
+}
+
+export interface BOQResult {
+  items: BOQItem[];
+  total_amount: number;
+  floor_area: number;
+  rate_per_sqft: number;
+  steel_summary: Record<string, number | string>;
+  cladding_summary: Record<string, number>;
+}
+
+export interface QuotationLog {
+  id: number;
+  quotation_id: number;
+  user_id: number;
+  action: string;
+  details?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MaterialRates {
+  structural_steel: number;
+  bare_galvalume: number;
+  puf_panel_roof: number;
+  puf_panel_wall: number;
+  ridge_flashing: number;
+  polycarbonate: number;
+  mezzanine_decking: number;
 }
 
 // ─────────────────────────────────────────────

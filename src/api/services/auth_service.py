@@ -6,7 +6,7 @@ Business logic for authentication: registration, login, token management.
 Rules enforced:
 - KB-004: Uses PyJWT exclusively (NOT python-jose)
 - KB-005: Password validation (8+ chars, 1 uppercase, 1 digit)
-- Uses sha256_crypt (NOT bcrypt) due to passlib 1.7.4 / bcrypt 4.x incompatibility
+- Uses bcrypt via passlib for password hashing (OWASP compliant)
 - KB-017: Always call db.refresh() / re-fetch after db.commit()
 """
 
@@ -24,8 +24,61 @@ from api.exceptions import ConflictError, NotFoundError, UnauthorizedError
 
 logger = logging.getLogger(__name__)
 
-# Use sha256_crypt — NOT bcrypt (passlib 1.7.4 incompatible with bcrypt 4.x)
-pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
+# Use bcrypt for password hashing (OWASP recommendation)
+# passlib 1.7.4 + bcrypt 4.0.1 are compatible; pin bcrypt<4.1 in requirements
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ── Token Blacklist (in-memory, cleared on restart) ─────────────
+# In production with multiple workers, replace with Redis SET.
+_revoked_jtis: set[str] = set()
+
+
+def revoke_token(jti: str) -> None:
+    """Add a token's jti to the blacklist."""
+    _revoked_jtis.add(jti)
+
+
+def is_token_revoked(jti: str) -> bool:
+    """Check if a token has been revoked."""
+    return jti in _revoked_jtis
+
+
+# ── Account Lockout (in-memory, cleared on restart) ─────────────
+# In production with multiple workers, replace with Redis HASH.
+_MAX_FAILED_ATTEMPTS = 10
+_LOCKOUT_SECONDS = 300  # 5 minutes
+
+_failed_logins: dict[str, dict] = {}  # email -> {"count": int, "locked_until": datetime}
+
+
+def _check_lockout(email: str) -> None:
+    """Raise UnauthorizedError if account is locked."""
+    record = _failed_logins.get(email)
+    if not record:
+        return
+    locked_until = record.get("locked_until")
+    if locked_until and datetime.now(timezone.utc) < locked_until:
+        remaining = int((locked_until - datetime.now(timezone.utc)).total_seconds())
+        raise UnauthorizedError(
+            detail=f"Account temporarily locked. Try again in {remaining} seconds."
+        )
+    # Lock expired — reset
+    if locked_until and datetime.now(timezone.utc) >= locked_until:
+        _failed_logins.pop(email, None)
+
+
+def _record_failed_login(email: str) -> None:
+    """Record a failed login attempt. Lock account after too many failures."""
+    record = _failed_logins.setdefault(email, {"count": 0, "locked_until": None})
+    record["count"] += 1
+    if record["count"] >= _MAX_FAILED_ATTEMPTS:
+        record["locked_until"] = datetime.now(timezone.utc) + timedelta(seconds=_LOCKOUT_SECONDS)
+        logger.warning("Account locked for %s after %d failed attempts", email, record["count"])
+
+
+def _clear_failed_logins(email: str) -> None:
+    """Clear failed login counter on successful login."""
+    _failed_logins.pop(email, None)
 
 
 class AuthService:
@@ -35,7 +88,7 @@ class AuthService:
 
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash a plaintext password using sha256_crypt."""
+        """Hash a plaintext password using bcrypt."""
         return pwd_context.hash(password)
 
     @staticmethod
@@ -65,6 +118,7 @@ class AuthService:
             "exp": expire,
             "iat": datetime.now(timezone.utc),
             "type": "access",
+            "jti": str(uuid.uuid4()),
         })
         encoded = jwt.encode(
             to_encode,
@@ -93,6 +147,7 @@ class AuthService:
             "exp": expire,
             "iat": datetime.now(timezone.utc),
             "type": "refresh",
+            "jti": str(uuid.uuid4()),
         })
         encoded = jwt.encode(
             to_encode,
@@ -210,35 +265,45 @@ class AuthService:
             dict with access_token, refresh_token, and user info.
 
         Raises:
-            UnauthorizedError: If email/password is invalid.
+            UnauthorizedError: If email/password is invalid or account is locked.
         """
+        # Check account lockout before attempting auth
+        _check_lockout(email)
+
         with db() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE email=?", (email,)
             ).fetchone()
 
         if not row:
+            _record_failed_login(email)
             raise UnauthorizedError(detail="Invalid email or password")
 
         user_dict = dict(row)
 
         if not cls.verify_password(password, user_dict.get("hashed_password", "")):
+            _record_failed_login(email)
             raise UnauthorizedError(detail="Invalid email or password")
 
         # Check if user is active
         if not user_dict.get("is_active", 1):
             raise UnauthorizedError(detail="Account is deactivated")
 
+        # Clear failed login counter on success
+        _clear_failed_logins(email)
+
         safe_user = _safe_user(user_dict)
         token_data = {
             "sub": user_dict["email"],
             "role": user_dict.get("role", "user"),
             "user_id": user_dict["id"],
+            "is_super_admin": bool(user_dict.get("is_super_admin", 0)),
+            "tenant_id": user_dict.get("tenant_id", ""),
         }
         access_token = cls.create_access_token(token_data)
         refresh_token = cls.create_refresh_token(token_data)
 
-        logger.info("User logged in: %s", email)
+        logger.info("User logged in: %s (super_admin=%s)", email, safe_user.get("is_super_admin"))
 
         return {
             "access_token": access_token,
@@ -306,20 +371,19 @@ class AuthService:
     # ── Logout ───────────────────────────────────────────────────
 
     @staticmethod
-    def logout(user_id: str) -> dict:
-        """Logout a user (KB-007).
-
-        In a stateless JWT setup, logout is primarily client-side.
-        Server-side we log the event. In production, you would add the
-        token to a blacklist in Redis.
+    def logout(user_id: str, token_jti: Optional[str] = None) -> dict:
+        """Logout a user — revokes the current token so it cannot be reused.
 
         Args:
             user_id: The ID of the user logging out.
+            token_jti: The jti claim from the current JWT (if available).
 
         Returns:
             dict with logout confirmation message.
         """
-        logger.info("User logged out: %s", user_id)
+        if token_jti:
+            revoke_token(token_jti)
+        logger.info("User logged out: %s (jti revoked: %s)", user_id, bool(token_jti))
         return {"message": "Logged out successfully"}
 
     # ── User Profile ─────────────────────────────────────────────
@@ -363,7 +427,7 @@ class AuthService:
         if not updates:
             raise NotFoundError(detail="No updates provided")
 
-        # Map schema fields to DB columns
+        # Map schema fields to DB columns — strict allowlist, no fallback
         field_mapping = {
             "full_name": "name",
             "company": "company",
@@ -372,9 +436,8 @@ class AuthService:
 
         db_updates = {}
         for key, value in updates.items():
-            if value is not None:
-                db_col = field_mapping.get(key, key)
-                db_updates[db_col] = value
+            if value is not None and key in field_mapping:
+                db_updates[field_mapping[key]] = value
 
         if not db_updates:
             raise NotFoundError(detail="No valid updates provided")
@@ -417,5 +480,7 @@ def _safe_user(user_dict: dict) -> dict:
         "phone": user_dict.get("phone", ""),
         "plan": user_dict.get("plan", "starter"),
         "is_active": bool(user_dict.get("is_active", 1)),
+        "is_super_admin": bool(user_dict.get("is_super_admin", 0)),
+        "tenant_id": user_dict.get("tenant_id", ""),
         "created_at": user_dict.get("created_at", ""),
     }

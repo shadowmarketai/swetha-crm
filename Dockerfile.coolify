@@ -1,0 +1,83 @@
+# ============================================
+# Swetha Structures CRM - Coolify Deployment
+# Lightweight build for VPS (no GPU/ML libs)
+# ============================================
+
+# Stage 1: Build Frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci --silent
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Python dependency builder
+FROM python:3.11-slim AS py-builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    libpq-dev \
+    ffmpeg \
+    libsndfile1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-prod.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements-prod.txt
+
+# Stage 3: Production runtime
+FROM python:3.11-slim
+
+LABEL maintainer="Shadow Market AI"
+LABEL description="Swetha Structures CRM - Coolify Deployment"
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    libpq5 \
+    curl \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=py-builder /install /usr/local
+
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser
+
+RUN mkdir -p /app/data/raw /app/data/processed /app/data/recordings /app/data/voices /app/models /app/logs \
+    && chown -R appuser:appuser /app
+
+COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser requirements-prod.txt ./
+COPY --chown=appuser:appuser alembic.ini ./
+
+# Copy built frontend
+COPY --from=frontend-builder --chown=appuser:appuser /frontend/dist ./static/
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV APP_ENV=production
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["tini", "--"]
+
+CMD ["python", "-m", "uvicorn", "src.api.server:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "2", \
+     "--proxy-headers", \
+     "--forwarded-allow-ips", "*", \
+     "--log-level", "info"]

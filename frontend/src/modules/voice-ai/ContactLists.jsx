@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search, Upload, Plus, Download, Trash2, Merge, Edit3, MoreHorizontal,
   Users, FileSpreadsheet, Globe, Database, ChevronLeft, ChevronRight,
   ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, MinusSquare
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { leadsAPI } from '../../services/api';
 import DialectBadge from './components/DialectBadge';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -99,10 +100,40 @@ export default function ContactListsPage() {
   const [sortField, setSortField] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
   const [currentPage, setCurrentPage] = useState(1);
+  const [apiLists, setApiLists] = useState([]);
+
+  // Load contact lists from CRM leads API
+  useEffect(() => {
+    let cancelled = false;
+    leadsAPI.getAll({ limit: 1 })
+      .then(({ data }) => {
+        if (cancelled) return;
+        // If backend returns lead list metadata, use it
+        if (data?.lists && Array.isArray(data.lists)) {
+          const mapped = data.lists.map(l => ({
+            id: `api-${l.id}`,
+            name: l.name || 'Imported List',
+            icon: 'database',
+            contacts: l.count || 0,
+            source: l.source || 'CRM Sync',
+            languageDist: l.language_dist || { tamil: 50, hindi: 25, english: 25 },
+            dialectBreakdown: l.dialect_breakdown || {},
+            created: l.created_at ? new Date(l.created_at).toISOString().split('T')[0] : '',
+            lastUsed: l.updated_at ? new Date(l.updated_at).toISOString().split('T')[0] : '',
+            status: 'active',
+          }));
+          setApiLists(mapped);
+        }
+      })
+      .catch(() => {}); // keep mock data
+    return () => { cancelled = true; };
+  }, []);
+
+  const allLists = useMemo(() => [...apiLists, ...mockLists], [apiLists]);
 
   // ── Filtering ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let result = [...mockLists];
+    let result = [...allLists];
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -120,7 +151,7 @@ export default function ContactListsPage() {
       });
     }
     return result;
-  }, [search, sortField, sortDir]);
+  }, [allLists, search, sortField, sortDir]);
 
   // ── Pagination ─────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));

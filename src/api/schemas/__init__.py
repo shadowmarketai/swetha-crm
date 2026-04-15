@@ -1,23 +1,23 @@
 """
-VoiceFlow Marketing AI - Pydantic Schemas Package
-===================================================
+Swetha Structures CRM - Pydantic Schemas Package
+==================================================
 All request/response models for the API, organized by domain.
 """
 
-from src.api.schemas.common import ErrorResponse, MessageResponse, PaginatedResponse
-from src.api.schemas.auth import (
+from api.schemas.common import ErrorResponse, MessageResponse, PaginatedResponse
+from api.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     TokenResponse,
     UserResponse,
     UserUpdate,
 )
-from src.api.schemas.voice import (
+from api.schemas.voice import (
     VoiceAnalysisResponse,
     VoiceProcessRequest,
     VoiceProcessResponse,
 )
-from src.api.schemas.crm import (
+from api.schemas.crm import (
     ActivityCreate,
     ActivityResponse,
     CompanyCreate,
@@ -33,12 +33,12 @@ from src.api.schemas.crm import (
     LeadResponse,
     LeadUpdate,
 )
-from src.api.schemas.campaign import (
+from api.schemas.campaign import (
     CampaignCreate,
     CampaignResponse,
     CampaignUpdate,
 )
-from src.api.schemas.helpdesk import (
+from api.schemas.helpdesk import (
     TicketCreate,
     TicketUpdate,
     TicketResponse,
@@ -46,7 +46,7 @@ from src.api.schemas.helpdesk import (
     TicketReplyResponse,
     TicketDashboardResponse,
 )
-from src.api.schemas.survey import (
+from api.schemas.survey import (
     SurveyCreate,
     SurveyUpdate,
     SurveyDetail,
@@ -54,7 +54,7 @@ from src.api.schemas.survey import (
     SurveyResponseDetail,
     SurveyAnalyticsResponse,
 )
-from src.api.schemas.workflow import (
+from api.schemas.workflow import (
     WorkflowCreate,
     WorkflowUpdate,
     WorkflowDetail,
@@ -62,14 +62,14 @@ from src.api.schemas.workflow import (
     WorkflowExecutionResponse,
     WorkflowTemplateResponse,
 )
-from src.api.schemas.tenant import (
+from api.schemas.tenant import (
     TenantCreate,
     TenantUpdate,
     TenantResponse,
     TenantStatsResponse,
     FeatureFlagsUpdate,
 )
-from src.api.schemas.webhook import (
+from api.schemas.webhook import (
     APIKeyCreate,
     APIKeyResponse,
     APIKeyCreatedResponse,

@@ -45,20 +45,13 @@ router = APIRouter(prefix="/api/v1", tags=["CRM"])
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _get_user_id(current_user: dict) -> int:
-    """Extract integer user_id from the current user dict.
+def _get_user_id(current_user: dict) -> str:
+    """Extract user_id string from the current user dict.
 
-    The legacy auth system stores ``id`` as a string (e.g. "user-001") while
-    the modern ORM uses integer PKs.  For the demo user we fall back to 1.
+    The legacy auth system stores ``id`` as a TEXT string (e.g. "user-001").
+    CRM models use String user_id to match.
     """
-    raw = current_user.get("id", "")
-    if isinstance(raw, int):
-        return raw
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        # Demo / legacy user whose id is a non-numeric string
-        return 1
+    return str(current_user.get("id", "user-001"))
 
 
 def _get_orm_db(conn) -> Session:
@@ -128,6 +121,9 @@ async def create_lead(
     user_id = _get_user_id(current_user)
     data = body.model_dump(exclude_none=False)
     result = crm_service.create_lead(db=session, user_id=user_id, data=data)
+    # Broadcast real-time event
+    from api.broadcast import broadcast_event
+    await broadcast_event("lead.created", result)
     return LeadResponse(**result)
 
 
@@ -168,6 +164,8 @@ async def update_lead(
     result = crm_service.update_lead(db=session, user_id=user_id, lead_id=lead_id, data=data)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("lead.updated", result)
     return LeadResponse(**result)
 
 
@@ -187,6 +185,8 @@ async def delete_lead(
     success = crm_service.delete_lead(db=session, user_id=user_id, lead_id=lead_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("lead.deleted", {"id": lead_id})
     return MessageResponse(message="Lead deleted successfully", success=True)
 
 
@@ -234,6 +234,8 @@ async def create_company(
     user_id = _get_user_id(current_user)
     data = body.model_dump(exclude_none=False)
     result = crm_service.create_company(db=session, user_id=user_id, data=data)
+    from api.broadcast import broadcast_event
+    await broadcast_event("company.created", result)
     return CompanyResponse(**result)
 
 
@@ -274,6 +276,8 @@ async def update_company(
     result = crm_service.update_company(db=session, user_id=user_id, company_id=company_id, data=data)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("company.updated", result)
     return CompanyResponse(**result)
 
 
@@ -293,6 +297,8 @@ async def delete_company(
     success = crm_service.delete_company(db=session, user_id=user_id, company_id=company_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("company.deleted", {"id": company_id})
     return MessageResponse(message="Company deleted successfully", success=True)
 
 
@@ -340,6 +346,8 @@ async def create_contact(
     user_id = _get_user_id(current_user)
     data = body.model_dump(exclude_none=False)
     result = crm_service.create_contact(db=session, user_id=user_id, data=data)
+    from api.broadcast import broadcast_event
+    await broadcast_event("contact.created", result)
     return ContactResponse(**result)
 
 
@@ -380,6 +388,8 @@ async def update_contact(
     result = crm_service.update_contact(db=session, user_id=user_id, contact_id=contact_id, data=data)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("contact.updated", result)
     return ContactResponse(**result)
 
 
@@ -427,6 +437,8 @@ async def create_deal(
     user_id = _get_user_id(current_user)
     data = body.model_dump(exclude_none=False)
     result = crm_service.create_deal(db=session, user_id=user_id, data=data)
+    from api.broadcast import broadcast_event
+    await broadcast_event("deal.created", result)
     return DealResponse(**result)
 
 
@@ -467,6 +479,8 @@ async def update_deal(
     result = crm_service.update_deal(db=session, user_id=user_id, deal_id=deal_id, data=data)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("deal.updated", result)
     return DealResponse(**result)
 
 
@@ -523,6 +537,8 @@ async def create_activity(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    from api.broadcast import broadcast_event
+    await broadcast_event("activity.created", result)
     return ActivityResponse(**result)
 
 

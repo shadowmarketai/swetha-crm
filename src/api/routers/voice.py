@@ -755,3 +755,124 @@ async def get_analysis(
         )
 
     return _analysis_to_dict(analysis)
+
+
+# =====================================================================
+# TTS SYNTHESIS (text → audio)
+# =====================================================================
+
+
+@router.post(
+    "/synthesize",
+    summary="Synthesize text to speech audio",
+)
+async def synthesize_speech(
+    request: Request,
+    body: dict,
+    current_user: dict = Depends(require_permission("voiceAI", "create")),
+):
+    """
+    Synthesize text to speech using the TTS engine.
+    Accepts JSON body: {text, language, emotion, voice_id, speed, dialect, pace, pitch}.
+    Returns base64-encoded audio and metadata.
+    Falls back to edge-tts if ML engines are unavailable.
+    """
+    text = body.get("text", "")
+    language = body.get("language", "ta")
+    emotion = body.get("emotion")
+    voice_id = body.get("voice_id")
+    speed = float(body.get("speed", body.get("pace", 1.0)))
+
+    if not text:
+        raise HTTPException(status_code=400, detail="'text' is required")
+
+    try:
+        from voice_engine.voice_ai_service import get_voice_ai_service
+        svc = get_voice_ai_service()
+        result = await svc.generate_response_audio(
+            text=text,
+            language=language,
+            detected_customer_emotion=emotion,
+            voice_id=voice_id,
+        )
+        return {
+            "audio_base64": result.get("audio_base64", ""),
+            "format": result.get("audio_format", "wav"),
+            "sample_rate": result.get("sample_rate", 22050),
+            "tts_engine": result.get("tts_engine", "edge-tts"),
+            "duration_ms": result.get("duration_ms", 0),
+        }
+    except ImportError:
+        logger.warning("Voice AI service not available, trying edge-tts directly")
+    except Exception as exc:
+        logger.warning("TTS via voice_ai_service failed: %s, trying edge-tts", exc)
+
+    # Fallback: edge-tts
+    try:
+        import edge_tts
+        import base64
+
+        voice_map = {
+            "ta": "ta-IN-PallaviNeural",
+            "hi": "hi-IN-SwaraNeural",
+            "en": "en-IN-NeerjaNeural",
+            "te": "te-IN-ShrutiNeural",
+            "kn": "kn-IN-SapnaNeural",
+            "ml": "ml-IN-SobhanaNeural",
+        }
+        voice_name = voice_map.get(language, "en-IN-NeerjaNeural")
+        rate_str = f"+{int((speed - 1) * 100)}%" if speed >= 1 else f"{int((speed - 1) * 100)}%"
+
+        communicate = edge_tts.Communicate(text, voice_name, rate=rate_str)
+        audio_chunks = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_chunks.append(chunk["data"])
+
+        if not audio_chunks:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="TTS produced no audio",
+            )
+
+        audio_bytes = b"".join(audio_chunks)
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        return {
+            "audio_base64": audio_b64,
+            "format": "mp3",
+            "sample_rate": 24000,
+            "tts_engine": "edge-tts",
+            "duration_ms": int(len(audio_bytes) / 24000 * 1000),
+        }
+    except Exception as exc:
+        logger.error("All TTS engines failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"TTS synthesis failed: {exc}",
+        )
+
+
+@router.get(
+    "/voices",
+    summary="List available TTS voices",
+)
+async def list_tts_voices(
+    language: Optional[str] = Query(None, description="Filter by language"),
+    current_user: dict = Depends(require_permission("voiceAI", "read")),
+):
+    """List built-in and cloned voices available for TTS."""
+    voices = [
+        {"id": "ta-IN-PallaviNeural", "name": "Pallavi (Tamil Female)", "language": "ta", "engine": "edge-tts"},
+        {"id": "ta-IN-ValluvarNeural", "name": "Valluvar (Tamil Male)", "language": "ta", "engine": "edge-tts"},
+        {"id": "hi-IN-SwaraNeural", "name": "Swara (Hindi Female)", "language": "hi", "engine": "edge-tts"},
+        {"id": "hi-IN-MadhurNeural", "name": "Madhur (Hindi Male)", "language": "hi", "engine": "edge-tts"},
+        {"id": "en-IN-NeerjaNeural", "name": "Neerja (English Female)", "language": "en", "engine": "edge-tts"},
+        {"id": "en-IN-PrabhatNeural", "name": "Prabhat (English Male)", "language": "en", "engine": "edge-tts"},
+        {"id": "te-IN-ShrutiNeural", "name": "Shruti (Telugu Female)", "language": "te", "engine": "edge-tts"},
+        {"id": "kn-IN-SapnaNeural", "name": "Sapna (Kannada Female)", "language": "kn", "engine": "edge-tts"},
+        {"id": "ml-IN-SobhanaNeural", "name": "Sobhana (Malayalam Female)", "language": "ml", "engine": "edge-tts"},
+    ]
+    if language:
+        voices = [v for v in voices if v["language"] == language]
+    return {"voices": voices}

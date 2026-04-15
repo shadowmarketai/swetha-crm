@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { campaignsAPI } from '../../services/api';
 import {
   Megaphone, Plus, Columns, Table2, X, Play, Pause, Edit3, Trash2,
   BarChart3, Calendar, Users, Phone, PhoneCall, ArrowUpDown, ArrowUp,
@@ -322,6 +323,39 @@ export default function CampaignsPage() {
 
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'table'
+
+  // Load campaigns from API on mount
+  useEffect(() => {
+    let cancelled = false;
+    campaignsAPI.getAll()
+      .then(({ data }) => {
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
+        const mapped = data.map(c => ({
+          id: c.id,
+          name: c.name || c.campaign_name || 'Campaign',
+          agent: c.agent_name || c.assistant_name || 'AI Agent',
+          status: c.status || 'scheduled',
+          total: c.total_contacts || c.total || 0,
+          called: c.calls_made || c.called || 0,
+          connected: c.calls_connected || c.connected || 0,
+          converted: c.conversions || c.converted || 0,
+          progress: c.total_contacts > 0 ? Math.round((c.calls_made || 0) / c.total_contacts * 100) : 0,
+          startDate: c.start_date ? new Date(c.start_date).toISOString().split('T')[0] : '',
+          endDate: c.end_date ? new Date(c.end_date).toISOString().split('T')[0] : '—',
+          targetDialect: c.target_dialect || 'Chennai',
+          dialects: c.dialects || [{ dialect: 'Chennai', count: 0, pct: 1.0 }],
+          emotions: c.emotions || { neutral: 1.0 },
+          genZMode: c.genz_mode || false,
+          genZScore: c.genz_score || 0,
+          genZTopTerms: c.genz_terms || [],
+          contactList: c.contact_list_name || c.contact_list || '',
+          emotionStrategy: c.emotion_strategy || 'Adaptive',
+        }));
+        setCampaigns(prev => [...mapped, ...prev.filter(p => !mapped.find(m => m.id === p.id))]);
+      })
+      .catch(() => {}); // keep mock data
+    return () => { cancelled = true; };
+  }, []);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

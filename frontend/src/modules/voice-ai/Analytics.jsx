@@ -2,8 +2,9 @@
  * Voice AI Analytics - Dialect, emotion, and GenZ analytics dashboard
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { analyticsAPI } from '../../services/api';
 import {
   Download, Calendar, TrendingUp, TrendingDown, Minus,
   Phone, BarChart3, Brain, Sparkles, Languages, Activity,
@@ -125,6 +126,19 @@ const TrendIcon = ({ trend }) => {
 
 export default function VoiceAnalyticsPage() {
   const [dateRange, setDateRange] = useState('Last 7 Days');
+  const [apiStats, setApiStats] = useState(null);
+
+  // Load analytics from API
+  useEffect(() => {
+    let cancelled = false;
+    analyticsAPI.getDashboard({ period: dateRange === 'Last 7 Days' ? '7d' : dateRange === 'Last 30 Days' ? '30d' : '90d' })
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setApiStats(data);
+      })
+      .catch(() => {}); // keep mock data
+    return () => { cancelled = true; };
+  }, [dateRange]);
 
   const totalDialectAnalyzed = DIALECT_DATA.reduce((sum, d) => sum + d.value, 0);
 
