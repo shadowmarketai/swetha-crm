@@ -382,22 +382,7 @@ def _include_routers(application: FastAPI) -> None:
 
     # Voice Agent (cloning, knowledge, recordings) is now in the voice-flow service.
 
-    # ── External module routers (may not be installed) ───────
-    _load_legacy_router(application, "billing.billing_service", "billing_router", "Billing")
-    # Assistants module is now in voice-flow service.
-    _load_legacy_router(application, "surveys.survey_service", "survey_router", "Survey Forms")
-
-    # Help Desk (two routers)
-    try:
-        from helpdesk.helpdesk_service import helpdesk_router, tickets_router
-        application.include_router(helpdesk_router)
-        application.include_router(tickets_router)
-        logger.info("Help Desk router loaded")
-    except Exception as exc:
-        logger.warning("Help Desk router not available: %s", exc)
-
-    # Voice AI pipeline is now in the voice-flow service.
-    # CRM integrates via /api/v1/voiceflow/* proxy endpoints.
+    # Legacy external module routers removed — all functionality is now in src/api/routers/
 
 
 def _load_legacy_router(
