@@ -75,26 +75,14 @@ export const authAPI = {
 // VOICE CALLS API
 // ============================================
 export const callsAPI = {
-  // Get all calls with filters
-  getAll: (params) => api.get('/api/v1/calls', { params }),
-  
-  // Get single call details
-  getById: (id) => api.get(`/api/v1/calls/${id}`),
-  
-  // Get call transcript
-  getTranscript: (id) => api.get(`/api/v1/calls/${id}/transcript`),
-  
-  // Get call recording URL
-  getRecording: (id) => api.get(`/api/v1/calls/${id}/recording`),
-  
-  // Make outbound call
-  makeCall: (data) => api.post('/api/v1/calls/outbound', data),
-  
-  // Get call analytics
-  getAnalytics: (params) => api.get('/api/v1/calls/analytics', { params }),
-  
-  // Get live calls
-  getLiveCalls: () => api.get('/api/v1/calls/live'),
+  // Voice calls are on the external Voice AI platform — silence 404s
+  getAll: (params) => api.get('/api/v1/calls', { params, _silent: true }),
+  getById: (id) => api.get(`/api/v1/calls/${id}`, { _silent: true }),
+  getTranscript: (id) => api.get(`/api/v1/calls/${id}/transcript`, { _silent: true }),
+  getRecording: (id) => api.get(`/api/v1/calls/${id}/recording`, { _silent: true }),
+  makeCall: (data) => api.post('/api/v1/calls/outbound', data, { _silent: true }),
+  getAnalytics: (params) => api.get('/api/v1/calls/analytics', { params, _silent: true }),
+  getLiveCalls: () => api.get('/api/v1/calls/live', { _silent: true }),
 };
 
 // ============================================
@@ -102,34 +90,34 @@ export const callsAPI = {
 // ============================================
 export const leadsAPI = {
   // Get all leads with filters
-  getAll: (params) => api.get('/api/v1/leads', { params }),
-  
+  getAll: (params) => api.get('/api/v1/crm-leads', { params }),
+
   // Get single lead
-  getById: (id) => api.get(`/api/v1/leads/${id}`),
-  
+  getById: (id) => api.get(`/api/v1/crm-leads/${id}`),
+
   // Create lead
-  create: (data) => api.post('/api/v1/leads', data),
-  
+  create: (data) => api.post('/api/v1/crm-leads', data),
+
   // Update lead
-  update: (id, data) => api.put(`/api/v1/leads/${id}`, data),
-  
+  update: (id, data) => api.put(`/api/v1/crm-leads/${id}`, data),
+
   // Delete lead
-  delete: (id) => api.delete(`/api/v1/leads/${id}`),
+  delete: (id) => api.delete(`/api/v1/crm-leads/${id}`),
   
   // Import leads from CSV
   import: (file) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post('/api/v1/leads/import', formData, {
+    return api.post('/api/v1/crm-leads/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
   
   // Export leads to CSV
-  export: (params) => api.get('/api/v1/leads/export', { params, responseType: 'blob' }),
+  export: (params) => api.get('/api/v1/crm-leads/export', { params, responseType: 'blob' }),
   
   // Get pipeline stats
-  getPipeline: () => api.get('/api/v1/leads/pipeline'),
+  getPipeline: () => api.get('/api/v1/crm-leads/pipeline'),
 };
 
 // ============================================
@@ -137,7 +125,7 @@ export const leadsAPI = {
 // ============================================
 export const assistantsAPI = {
   // Get all assistants
-  getAll: () => api.get('/api/v1/assistants'),
+  getAll: () => api.get('/api/v1/assistants', { _silent: true }),
   
   // Get single assistant
   getById: (id) => api.get(`/api/v1/assistants/${id}`),
@@ -280,7 +268,7 @@ export const ticketsAPI = {
 // ============================================
 export const analyticsAPI = {
   // Get dashboard stats
-  getDashboard: (params) => api.get('/api/v1/analytics/dashboard', { params }),
+  getDashboard: (params) => api.get('/api/v1/dashboard', { params, _silent: true }),
   
   // Get call volume
   getCallVolume: (params) => api.get('/api/v1/analytics/calls/volume', { params }),
@@ -332,7 +320,7 @@ export const ttsAPI = {
 // ============================================
 export const integrationsAPI = {
   // Get all integrations
-  getAll: () => api.get('/api/v1/integrations'),
+  getAll: () => api.get('/api/v1/integrations', { _silent: true }),
   
   // Connect integration
   connect: (provider, data) => api.post(`/api/v1/integrations/${provider}/connect`, data),
