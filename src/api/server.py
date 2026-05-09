@@ -10,6 +10,7 @@ Configuration is centralised in api/config.py via pydantic-settings.
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Depends
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
         docs_url=None if is_prod else "/docs",
         redoc_url=None if is_prod else "/redoc",
         openapi_url=None if is_prod else "/openapi.json",
+        lifespan=_lifespan,
     )
 
     # Attach limiter state for slowapi
@@ -89,9 +91,6 @@ def create_app() -> FastAPI:
 
     # ── Exception Handlers ───────────────────────────────────
     register_exception_handlers(application)
-
-    # ── Lifecycle Events ─────────────────────────────────────
-    _register_lifecycle(application)
 
     # ── API info endpoint ──────────────────────────────────────
     @application.get("/api/info")
@@ -262,63 +261,49 @@ def _mount_frontend(application: FastAPI) -> None:
         return FileResponse(str(index_html))
 
 
-# ── Lifecycle Events ─────────────────────────────────────────────
+# ── Lifecycle (lifespan) ─────────────────────────────────────────
 
-def _register_lifecycle(application: FastAPI) -> None:
-    """Register startup and shutdown events."""
+@asynccontextmanager
+async def _lifespan(application: FastAPI):
+    """FastAPI lifespan handler — startup before yield, shutdown after."""
 
-    @application.on_event("startup")
-    async def startup_event():
-        # Startup checks
+    # Startup checks
+    try:
+        from api.startup import run_startup_checks
+        run_startup_checks()
+    except Exception as exc:
+        logger.warning("Startup checks warning: %s", exc)
+
+    logger.info("Initializing %s...", settings.APP_NAME)
+
+    try:
+        from api.database import init_db
+        init_db()
+        logger.info("Database initialized.")
+    except Exception as exc:
+        logger.warning("Database init warning: %s", exc)
+
+    # Quotation render background worker.
+    # Multi-worker safety: gate via RUN_BG_WORKER. Run a dedicated
+    # single-worker container in production with RUN_BG_WORKER=1, and set
+    # RUN_BG_WORKER=0 on the API containers.
+    if os.environ.get("RUN_BG_WORKER", "1") == "1":
         try:
-            from api.startup import run_startup_checks
-            run_startup_checks()
+            from api.services.quotation_render_worker import start_worker
+            start_worker()
         except Exception as exc:
-            logger.warning("Startup checks warning: %s", exc)
+            logger.warning("Quotation render worker not started: %s", exc)
+    else:
+        logger.info("RUN_BG_WORKER=0 — render worker thread skipped in this process")
 
-        logger.info("Initializing %s...", settings.APP_NAME)
+    # Voice AI is now a separate service (voice-flow).
+    application.state.voice_engine = None
 
-        # Initialize database
-        try:
-            from api.database import init_db
-            init_db()
-            logger.info("Database initialized.")
-        except Exception as exc:
-            logger.warning("Database init warning: %s", exc)
+    logger.info("%s ready!", settings.APP_NAME)
 
-        # NOTE: default quotation template seeding is DISABLED by design.
-        # Tenants create their own templates from /quotation/templates.
-        # (The PEB_* presets in quotation_template_seed.py are still available
-        # as a one-click import option inside the Template Studio later.)
+    yield
 
-        # Start the quotation render background worker (auto-generates
-        # 3D / drawings / AI renders for new client intakes).
-        #
-        # Multi-worker safety: this thread polls the same DB table every
-        # 10 seconds, so running it in N uvicorn workers causes N× duplicate
-        # work and race conditions on quote.render_3d_url assignment. Gate
-        # it behind RUN_BG_WORKER (default "1" so single-worker dev is
-        # unchanged). For multi-worker production, set RUN_BG_WORKER=0 in
-        # the API container and run a separate single-worker container with
-        # RUN_BG_WORKER=1 dedicated to background processing.
-        if os.environ.get("RUN_BG_WORKER", "1") == "1":
-            try:
-                from api.services.quotation_render_worker import start_worker
-                start_worker()
-            except Exception as exc:
-                logger.warning("Quotation render worker not started: %s", exc)
-        else:
-            logger.info("RUN_BG_WORKER=0 — render worker thread skipped in this process")
-
-        # Voice AI is now a separate service (voice-flow).
-        # CRM integrates via API at VOICEFLOW_API_URL.
-        application.state.voice_engine = None
-
-        logger.info("%s ready!", settings.APP_NAME)
-
-    @application.on_event("shutdown")
-    async def shutdown_event():
-        logger.info("Shutting down %s...", settings.APP_NAME)
+    logger.info("Shutting down %s...", settings.APP_NAME)
 
 
 # ── Router Registration ─────────────────────────────────────────
