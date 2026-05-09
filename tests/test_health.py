@@ -25,8 +25,8 @@ class TestHealthSync:
     """Health checks using httpx AsyncClient."""
 
     async def test_root_returns_app_info(self, client):
-        """GET / should return app name, version, status, and features."""
-        resp = await client.get("/")
+        """GET /api/info should return app name, version, status, and features (non-prod)."""
+        resp = await client.get("/api/info")
         assert resp.status_code == 200
         data = resp.json()
         assert "name" in data
@@ -113,14 +113,13 @@ class TestHealthAsync:
         assert resp.status_code == 200
 
     async def test_root_has_features_list(self, async_client):
-        """GET / should list supported features."""
-        resp = await async_client.get("/")
+        """GET /api/info should list supported features (Swetha CRM + Quotation surface)."""
+        resp = await async_client.get("/api/info")
         data = resp.json()
         features = data.get("features", [])
         assert len(features) > 0
-        # Verify some expected features are present
         features_lower = [f.lower() for f in features]
-        assert any("asr" in f or "dialect" in f for f in features_lower)
+        assert any("crm" in f or "quotation" in f for f in features_lower)
 
     async def test_health_returns_timestamp(self, async_client):
         """GET /health timestamp should be a valid ISO-8601 string."""
