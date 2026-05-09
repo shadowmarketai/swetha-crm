@@ -101,10 +101,33 @@ def create_app() -> FastAPI:
     # ── Include Routers ──────────────────────────────────────
     _include_routers(application)
 
+    # ── /renders mount for AI photoreal images ──
+    # Must be registered BEFORE the SPA catch-all so it wins precedence.
+    _mount_render_storage(application)
+
     # ── Static Files & SPA Fallback ────────────────────────
     _mount_frontend(application)
 
     return application
+
+
+# ── AI Render Storage ────────────────────────────────────────────
+
+def _mount_render_storage(application: FastAPI) -> None:
+    """
+    Serve generated AI renders at `/renders/<filename>`.
+
+    The directory is created on demand so this works even on a fresh checkout
+    where the AI render service has not yet written any files.
+    """
+    renders_dir = Path(__file__).resolve().parent.parent.parent / "static" / "renders"
+    renders_dir.mkdir(parents=True, exist_ok=True)
+    application.mount(
+        "/renders",
+        StaticFiles(directory=str(renders_dir)),
+        name="ai-renders",
+    )
+    logger.info("Serving AI renders from %s at /renders", renders_dir)
 
 
 # ── Frontend Static Files ────────────────────────────────────────
@@ -112,9 +135,12 @@ def create_app() -> FastAPI:
 def _mount_frontend(application: FastAPI) -> None:
     """Serve the React SPA from /static/ with index.html fallback."""
     static_dir = Path(__file__).resolve().parent.parent.parent / "static"
-    if not static_dir.exists():
-        logger.info("No static/ directory found — frontend not bundled in this build")
-        # Fallback: return API info at root
+    index_html = static_dir / "index.html"
+    # Only register the SPA catch-all when an actual bundled index.html exists.
+    # The directory alone isn't enough — the AI render storage also lives in
+    # static/renders/, so the dir can exist in dev mode without a built SPA.
+    if not index_html.exists():
+        logger.info("No bundled SPA found at %s — running as API-only", index_html)
         @application.get("/")
         async def root_fallback():
             return {"name": settings.APP_NAME, "version": settings.APP_VERSION, "status": "running"}
