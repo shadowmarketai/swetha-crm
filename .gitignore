@@ -59,6 +59,10 @@ dist/
 *.key
 secrets/
 
+# ----- Runtime media (AI-generated renders + caches) -----
+static/renders/
+static/__pycache__/
+
 # ----- IDE -----
 .idea/
 .vscode/
