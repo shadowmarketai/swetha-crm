@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import {
   ArrowLeft, Send, Copy, Link2, RefreshCw, Download, MessageCircle,
   IndianRupee, TrendingUp, Shield, ExternalLink, Check, X, Clock,
+  FileText, ChevronDown, ChevronUp, Box, Ruler, Wand2,
 } from 'lucide-react';
 import {
   Card, CardHeader, Stat, Button, Modal, Field, Input, PageHeader,
@@ -25,6 +26,8 @@ export default function QuotationDetail() {
 
   const [quote, setQuote] = useState(null);
   const [offers, setOffers] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
   const [loading, setLoading] = useState(true);
   const [portalToken, setPortalToken] = useState(null);
   const [generating, setGenerating] = useState(false);
@@ -35,12 +38,14 @@ export default function QuotationDetail() {
   const load = async () => {
     setLoading(true);
     try {
-      const [q, o] = await Promise.all([
+      const [q, o, l] = await Promise.all([
         quotationAPI.get(quotationId),
         quotationTemplateAPI.listOffers(quotationId).catch(() => ({ data: [] })),
+        quotationAPI.getLogs(quotationId).catch(() => ({ data: { items: [] } })),
       ]);
       setQuote(q.data);
       setOffers(o.data || []);
+      setLogs(l.data?.items || l.data || []);
     } catch {
       toast.error('Quotation not found');
     } finally {
@@ -66,7 +71,8 @@ export default function QuotationDetail() {
 
   const downloadPdf = async () => {
     try {
-      const res = await quotationAPI.downloadPdf(quotationId);
+      // Generate first, then download
+      const res = await quotationAPI.generatePdf(quotationId);
       const blob = new Blob([res.data], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -144,6 +150,22 @@ export default function QuotationDetail() {
         actions={
           <>
             <Button variant="secondary" leftIcon={ArrowLeft} onClick={() => navigate(-1)}>Back</Button>
+            <Button variant="secondary" leftIcon={Box} onClick={() => navigate(`/quotation/${quotationId}/3d`)}>View 3D</Button>
+            <Button variant="secondary" leftIcon={Ruler} onClick={() => navigate(`/quotation/${quotationId}/drawings`)}>Drawings</Button>
+            <Button
+              variant="secondary"
+              leftIcon={Wand2}
+              onClick={() => navigate(`/quotation/ai-image?quotationId=${quote.id}`, {
+                state: {
+                  params: quote.building_params,
+                  boq: quote.boq_results,
+                  lead: { company: quote.client_name },
+                  quotationId: quote.id,
+                },
+              })}
+            >
+              AI Render
+            </Button>
             <Button variant="secondary" leftIcon={Download} onClick={downloadPdf}>Download PDF</Button>
             <Button variant="secondary" leftIcon={Link2} onClick={generatePortalLink} loading={generating}>Portal Link</Button>
             <Button leftIcon={MessageCircle} onClick={() => setShowWhatsAppModal(true)}>Send on WhatsApp</Button>
@@ -285,6 +307,58 @@ export default function QuotationDetail() {
               </tbody>
             </table>
           </div>
+        </Card>
+      )}
+
+      {/* Audit Logs */}
+      {logs.length > 0 && (
+        <Card>
+          <button
+            onClick={() => setShowLogs(!showLogs)}
+            className="w-full flex items-center justify-between p-5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-slate-500" />
+              <span className="font-semibold text-sm">Audit Trail</span>
+              <Badge>{logs.length}</Badge>
+            </div>
+            {showLogs ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </button>
+          {showLogs && (
+            <div className="px-5 pb-5 space-y-2 max-h-80 overflow-y-auto">
+              {logs.map((log, i) => {
+                const actionColors = {
+                  created: 'bg-green-100 text-green-700', updated: 'bg-blue-100 text-blue-700',
+                  sent: 'bg-indigo-100 text-indigo-700', pdf_generated: 'bg-purple-100 text-purple-700',
+                  revised: 'bg-amber-100 text-amber-700', deleted: 'bg-red-100 text-red-700',
+                  status_changed: 'bg-cyan-100 text-cyan-700', offer_approved: 'bg-emerald-100 text-emerald-700',
+                  offer_rejected: 'bg-rose-100 text-rose-700', quote_accepted: 'bg-green-100 text-green-700',
+                };
+                return (
+                  <div key={log.id || i} className="flex items-start gap-3 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
+                    <div className="flex-shrink-0 mt-0.5">
+                      <div className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${actionColors[log.action] || 'bg-slate-100 text-slate-600'}`}>
+                          {log.action?.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {log.created_at ? new Date(log.created_at).toLocaleString() : ''}
+                        </span>
+                      </div>
+                      {log.details && Object.keys(log.details).length > 0 && (
+                        <p className="text-xs text-slate-500 mt-0.5 truncate">
+                          {Object.entries(log.details).map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       )}
 
