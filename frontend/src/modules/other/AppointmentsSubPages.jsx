@@ -12,7 +12,7 @@ import { Skeleton, EmptyState } from '../../components/ui/primitives';
 // ==================== BOOKINGS PAGE ====================
 export function BookingsPage() {
   const { can } = usePermissions();
-  const canUpdate = can('voiceAI', 'update');
+  const canUpdate = can('appointments', 'update');
   const [tab, setTab] = useState('upcoming');
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -279,9 +279,9 @@ export function AvailabilityPage() {
 // ==================== SERVICES PAGE ====================
 export function ServicesPage() {
   const { can } = usePermissions();
-  const canCreate = can('voiceAI', 'create');
-  const canUpdate = can('voiceAI', 'update');
-  const canDelete = can('voiceAI', 'delete');
+  const canCreate = can('appointments', 'create');
+  const canUpdate = can('appointments', 'update');
+  const canDelete = can('appointments', 'delete');
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', duration: '30', price: '' });
@@ -454,7 +454,7 @@ export function ServicesPage() {
 // ==================== BOOKING PAGES PAGE ====================
 export function BookingPagesPage() {
   const { can } = usePermissions();
-  const canCreate = can('voiceAI', 'create');
+  const canCreate = can('appointments', 'create');
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
 

@@ -42,17 +42,6 @@ const moduleRoutes = {
       { path: '/crm/settings', label: 'Settings' },
     ],
   },
-  voiceAI: {
-    path: '/voice',
-    subNav: [
-      { path: '/voice', label: 'Overview' },
-      { path: '/voice/live-calls', label: 'Live Calls' },
-      { path: '/voice/agents', label: 'AI Agents' },
-      { path: '/voice/campaigns', label: 'Campaigns' },
-      { path: '/voice/call-logs', label: 'Call History' },
-      { path: '/voice/analytics', label: 'Analytics' },
-    ],
-  },
   quotation: {
     path: '/quotation',
     subNav: [

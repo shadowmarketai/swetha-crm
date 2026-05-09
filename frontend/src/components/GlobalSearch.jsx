@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, X, Phone, Users, Bot, Megaphone, FileText, Headphones, ArrowRight, Clock } from 'lucide-react'
-import { leadsAPI, callsAPI, assistantsAPI, campaignsAPI } from '../services/api'
+import { Search, X, Users, Megaphone, ArrowRight, Clock } from 'lucide-react'
+import { leadsAPI, campaignsAPI } from '../services/api'
 
 const RECENT_KEY = 'swetha_recent_searches'
 
@@ -15,9 +15,7 @@ function saveRecent(query) {
 }
 
 const CATEGORY_META = {
-  leads:     { label: 'Leads',      icon: Users,     color: 'text-blue-500',   path: '/leads' },
-  calls:     { label: 'Calls',      icon: Phone,     color: 'text-green-500',  path: '/calls' },
-  assistants:{ label: 'Assistants', icon: Bot,       color: 'text-purple-500', path: '/assistants' },
+  leads:     { label: 'Leads',      icon: Users,     color: 'text-blue-500',   path: '/crm/leads' },
   campaigns: { label: 'Campaigns',  icon: Megaphone, color: 'text-orange-500', path: '/campaigns' },
 }
 
@@ -57,22 +55,18 @@ export default function GlobalSearch({ open, onClose }) {
     setLoading(true)
     const searches = await Promise.allSettled([
       leadsAPI.getAll({ search: q, limit: 3 }),
-      callsAPI.getAll({ search: q, limit: 3 }),
-      assistantsAPI.getAll(),
       campaignsAPI.getAll({ search: q, limit: 3 }),
     ])
-    const [leadsRes, callsRes, assistantsRes, campaignsRes] = searches
+    const [leadsRes, campaignsRes] = searches
     const newResults = {}
 
-    const leads = leadsRes.status === 'fulfilled' ? leadsRes.value.data?.leads || [] : []
-    if (leads.length) newResults.leads = leads.slice(0, 3).map(l => ({ id: l.id, title: l.name, subtitle: l.phone || l.email || '', path: '/leads' }))
-
-    const calls = callsRes.status === 'fulfilled' ? callsRes.value.data?.calls || [] : []
-    if (calls.length) newResults.calls = calls.slice(0, 3).map(c => ({ id: c.id, title: c.contact_name || c.phone_number, subtitle: `${c.duration_seconds || 0}s · ${c.status}`, path: '/calls' }))
-
-    const allAssistants = assistantsRes.status === 'fulfilled' ? assistantsRes.value.data?.assistants || [] : []
-    const filteredA = allAssistants.filter(a => a.name?.toLowerCase().includes(q.toLowerCase()))
-    if (filteredA.length) newResults.assistants = filteredA.slice(0, 3).map(a => ({ id: a.id, title: a.name, subtitle: a.voice || '', path: '/assistants' }))
+    const leads = leadsRes.status === 'fulfilled'
+      ? (leadsRes.value.data?.leads || leadsRes.value.data?.items || [])
+      : []
+    if (leads.length) newResults.leads = leads.slice(0, 3).map(l => {
+      const fullName = l.name || [l.first_name, l.last_name].filter(Boolean).join(' ') || 'Unknown'
+      return { id: l.id, title: fullName, subtitle: l.phone || l.email || '', path: `/crm/leads/${l.id}` }
+    })
 
     const campaigns = campaignsRes.status === 'fulfilled' ? campaignsRes.value.data?.campaigns || [] : []
     if (campaigns.length) newResults.campaigns = campaigns.slice(0, 3).map(c => ({ id: c.id, title: c.name, subtitle: c.status || '', path: '/campaigns' }))
@@ -120,7 +114,7 @@ export default function GlobalSearch({ open, onClose }) {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search leads, calls, assistants, campaigns..."
+            placeholder="Search leads and campaigns..."
             className="flex-1 text-base outline-none text-gray-900 placeholder-gray-400"
             value={query}
             onChange={e => handleQueryChange(e.target.value)}

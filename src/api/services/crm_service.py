@@ -1,5 +1,5 @@
 """
-VoiceFlow Marketing AI - CRM Service Layer
+Swetha Structures CRM - CRM Service Layer
 ============================================
 Business logic for CRM operations: Leads, Companies, Contacts, Deals, Activities.
 All queries enforce tenant isolation via user_id.
@@ -25,7 +25,7 @@ from api.models.crm import (
     DealStage,
     ActivityType,
 )
-from api.models.voice import VoiceAnalysis
+from api.models.voiceflow import VoiceflowConversation
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +227,7 @@ def get_leads(
 
 
 def get_lead_by_id(db: Session, user_id: str, lead_id) -> Optional[dict[str, Any]]:
-    """Get a single lead by ID, including voice analyses."""
+    """Get a single lead by ID, including VoiceFlow conversations."""
     lead = (
         db.query(Lead)
         .filter(Lead.id == lead_id, Lead.user_id == user_id)
@@ -241,27 +241,26 @@ def get_lead_by_id(db: Session, user_id: str, lead_id) -> Optional[dict[str, Any
 
     lead_dict = _lead_to_dict(lead)
 
-    # Attach voice analyses
-    analyses = (
-        db.query(VoiceAnalysis)
-        .filter(VoiceAnalysis.lead_id == lead_id)
-        .order_by(VoiceAnalysis.created_at.desc())
+    # Attach VoiceFlow conversations (synced from VoiceFlow SaaS via webhook)
+    conversations = (
+        db.query(VoiceflowConversation)
+        .filter(VoiceflowConversation.lead_id == lead_id)
+        .order_by(VoiceflowConversation.started_at.desc().nullslast())
         .limit(50)
         .all()
     )
-    lead_dict["voice_analyses"] = [
+    lead_dict["voiceflow_conversations"] = [
         {
-            "id": a.id,
-            "request_id": a.request_id,
-            "transcription": a.transcription,
-            "emotion": _serialize_enum(a.emotion),
-            "intent": _serialize_enum(a.intent),
-            "lead_score": a.lead_score,
-            "sentiment": a.sentiment,
-            "dialect": _serialize_enum(a.dialect),
-            "created_at": _serialize_datetime(a.created_at),
+            "id": c.id,
+            "voiceflow_session_id": c.voiceflow_session_id,
+            "status": _serialize_enum(c.status),
+            "summary": c.summary,
+            "sentiment": c.sentiment,
+            "duration_sec": c.duration_sec,
+            "started_at": _serialize_datetime(c.started_at),
+            "ended_at": _serialize_datetime(c.ended_at),
         }
-        for a in analyses
+        for c in conversations
     ]
 
     return lead_dict

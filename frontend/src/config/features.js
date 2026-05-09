@@ -1,14 +1,16 @@
 /**
  * Swetha Structures CRM - Feature Configuration
- * CRM + Automation + Quotation for Swetha Structures
- * Voice AI is now a separate SaaS product (voice-flow)
+ * CRM + Automation + Quotation for Swetha Structures.
+ *
+ * Voice AI is no longer a CRM module — VoiceFlow is a separate SaaS.
+ * Lead detail page surfaces VoiceFlow conversations + recordings via the
+ * /api/v1/voiceflow/* endpoints.
  */
 
 export const defaultFeatures = {
   productName: 'Swetha CRM',
   modules: {
     crm: { enabled: true, name: 'CRM', icon: 'Users', description: 'Lead & customer management' },
-    voiceAI: { enabled: true, name: 'Voice AI', icon: 'Mic', description: 'Voice agent monitoring & control' },
     quotation: { enabled: true, name: 'Quotation', icon: 'ClipboardList', description: 'PEB quotation system' },
     appointments: { enabled: true, name: 'Appointments', icon: 'Calendar', description: 'Booking & scheduling' },
     automation: { enabled: true, name: 'Automation', icon: 'Zap', description: 'Workflow builder' },
@@ -23,9 +25,10 @@ export const defaultFeatures = {
   regional: {
     languages: ['en', 'hi', 'ta'],
   },
-  // VoiceFlow AI integration settings
+  // External VoiceFlow SaaS integration. Lead push + webhook callback are
+  // wired through the backend; the UI just renders the resulting conversations
+  // on each lead's detail page.
   voiceflowIntegration: {
-    apiUrl: 'http://localhost:8001',
     enabled: true,
   },
 };

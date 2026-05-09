@@ -42,9 +42,13 @@ class Settings(BaseSettings):
     ]
 
     # ── VoiceFlow AI Integration ────────────────────────────────
-    # Connect to standalone VoiceFlow AI SaaS for voice features
+    # Connect to standalone VoiceFlow AI SaaS. CRM pushes leads via REST and
+    # receives conversation/recording updates via signed webhooks.
     VOICEFLOW_API_URL: str = "http://localhost:8001"
     VOICEFLOW_API_KEY: str = ""
+    # Shared secret used to HMAC-SHA256 sign webhook bodies. Must match the
+    # value configured on the VoiceFlow side. Required to accept webhooks.
+    VOICEFLOW_WEBHOOK_SECRET: str = ""
 
     # ── AI Providers (for AI Quotation Engine) ────────────────────
     ANTHROPIC_API_KEY: str = ""

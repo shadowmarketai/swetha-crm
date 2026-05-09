@@ -318,9 +318,6 @@ async def _lifespan(application: FastAPI):
     else:
         logger.info("RUN_BG_WORKER=0 — render worker thread skipped in this process")
 
-    # Voice AI is now a separate service (voice-flow).
-    application.state.voice_engine = None
-
     logger.info("%s ready!", settings.APP_NAME)
 
     yield
@@ -347,15 +344,12 @@ def _include_routers(application: FastAPI) -> None:
     except Exception as exc:
         logger.warning("User Management router not available: %s", exc)
 
-    # CRM and Voice routers (may not exist in all branches)
+    # CRM router (leads, deals, contacts, activities, companies)
     try:
         from api.routers.crm import router as new_crm_router
         application.include_router(new_crm_router)
     except Exception as exc:
         logger.warning("CRM modular router not available: %s", exc)
-
-    # Voice analysis is now in the voice-flow service.
-    # CRM accesses voice data via VoiceFlow API integration.
 
     # Campaigns, Analytics, Billing routers
     from api.routers.campaigns import router as new_campaigns_router
@@ -488,15 +482,13 @@ def _include_routers(application: FastAPI) -> None:
     except Exception as exc:
         logger.warning("Lead Sources router not available: %s", exc)
 
-    # Dialer (campaigns, contacts, calls, DNC)
+    # VoiceFlow Integration (push leads → VoiceFlow SaaS, receive conversations + recordings via webhook)
     try:
-        from api.routers.dialer import router as dialer_router
-        application.include_router(dialer_router)
-        logger.info("Dialer router loaded")
+        from api.routers.voiceflow import router as voiceflow_router
+        application.include_router(voiceflow_router)
+        logger.info("VoiceFlow integration router loaded")
     except Exception as exc:
-        logger.warning("Dialer router not available: %s", exc)
-
-    # Voice Agent (cloning, knowledge, recordings) is now in the voice-flow service.
+        logger.warning("VoiceFlow integration router not available: %s", exc)
 
     # Legacy external module routers removed — all functionality is now in src/api/routers/
 

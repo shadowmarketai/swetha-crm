@@ -4,15 +4,15 @@ import PERMISSION_MATRIX from '../../config/permissions';
 
 const ROLES = ['admin', 'manager', 'agent', 'user', 'viewer'];
 const MODULES = [
-  'crm', 'voiceAI', 'marketing', 'campaigns', 'analytics',
+  'crm', 'marketing', 'campaigns', 'analytics',
   'helpdesk', 'surveys', 'billing', 'tenants', 'whiteLabel',
   'userManagement', 'settings', 'appointments', 'automation', 'inbox', 'webhooks',
+  'quotation',
 ];
 const ACTIONS = ['create', 'read', 'update', 'delete'];
 
 const MODULE_LABELS = {
   crm: 'CRM',
-  voiceAI: 'Voice AI',
   marketing: 'Marketing',
   campaigns: 'Campaigns',
   analytics: 'Analytics',
@@ -27,6 +27,7 @@ const MODULE_LABELS = {
   automation: 'Automation',
   inbox: 'Inbox',
   webhooks: 'Webhooks',
+  quotation: 'Quotation',
 };
 
 export default function PermissionMatrix() {

@@ -1,9 +1,11 @@
 """
-VoiceFlow Marketing AI - Analytics Router
+Swetha Structures CRM - Analytics Router
 ==========================================
-Enhanced analytics: summary metrics, emotion/intent/dialect distributions,
-campaign comparisons, lead funnels, time-series trends, custom queries,
-and CSV export.
+Analytics: summary metrics, campaign comparisons, lead funnels,
+time-series trends, custom queries, CSV export.
+
+Voice analytics (emotions, intents, dialects) are produced by the external
+VoiceFlow SaaS and surfaced per-lead via the /voiceflow endpoints.
 """
 
 import csv
@@ -21,9 +23,9 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.permissions import require_permission
 from api.models.analytics import AnalyticsEvent
-from api.models.voice import VoiceAnalysis
 from api.models.campaign import Campaign, CampaignStatus as ModelCampaignStatus
 from api.models.crm import Lead, LeadStatus, Deal, DealStage
+from api.models.voiceflow import VoiceflowConversation
 
 logger = logging.getLogger(__name__)
 
@@ -43,31 +45,7 @@ class SummaryResponse(BaseModel):
     active_campaigns: int = 0
     avg_lead_score: float = 0.0
     avg_sentiment: float = 0.0
-    total_voice_analyses: int = 0
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class EmotionDataPoint(BaseModel):
-    emotion: str
-    count: int
-    percentage: float
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class IntentDataPoint(BaseModel):
-    intent: str
-    count: int
-    percentage: float
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class DialectDataPoint(BaseModel):
-    dialect: str
-    count: int
-    percentage: float
+    total_voiceflow_conversations: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -162,6 +140,15 @@ def _parse_date_range(
     return start, end
 
 
+def _conversations_for_user_query(db: Session, user_id: int):
+    """Query VoiceflowConversation joined to Lead so we can filter by tenant user."""
+    return (
+        db.query(VoiceflowConversation)
+        .join(Lead, VoiceflowConversation.lead_id == Lead.id)
+        .filter(Lead.user_id == user_id)
+    )
+
+
 # ── GET /summary — Overview metrics ──────────────────────────────
 
 
@@ -180,13 +167,14 @@ async def get_summary(
     user_id = _get_user_id(current_user)
     start, end = _parse_date_range(date_from, date_to)
 
-    # Voice analyses = calls
+    # VoiceFlow conversations = calls
     total_calls = (
-        db.query(func.count(VoiceAnalysis.id))
+        db.query(func.count(VoiceflowConversation.id))
+        .join(Lead, VoiceflowConversation.lead_id == Lead.id)
         .filter(
-            VoiceAnalysis.user_id == user_id,
-            VoiceAnalysis.created_at >= start,
-            VoiceAnalysis.created_at <= end,
+            Lead.user_id == user_id,
+            VoiceflowConversation.created_at >= start,
+            VoiceflowConversation.created_at <= end,
         )
         .scalar()
     ) or 0
@@ -237,20 +225,23 @@ async def get_summary(
         .scalar()
     ) or 0
 
-    # Average lead score and sentiment from voice analyses
-    voice_agg = (
-        db.query(
-            func.coalesce(func.avg(VoiceAnalysis.lead_score), 0).label("avg_score"),
-            func.coalesce(func.avg(VoiceAnalysis.sentiment), 0).label("avg_sentiment"),
-            func.count(VoiceAnalysis.id).label("total_analyses"),
-        )
+    # Average lead score from Lead model; average sentiment from VoiceFlow conversations
+    avg_lead_score = (
+        db.query(func.coalesce(func.avg(Lead.lead_score), 0))
+        .filter(Lead.user_id == user_id)
+        .scalar()
+    ) or 0.0
+
+    avg_sentiment = (
+        db.query(func.coalesce(func.avg(VoiceflowConversation.sentiment), 0))
+        .join(Lead, VoiceflowConversation.lead_id == Lead.id)
         .filter(
-            VoiceAnalysis.user_id == user_id,
-            VoiceAnalysis.created_at >= start,
-            VoiceAnalysis.created_at <= end,
+            Lead.user_id == user_id,
+            VoiceflowConversation.created_at >= start,
+            VoiceflowConversation.created_at <= end,
         )
-        .first()
-    )
+        .scalar()
+    ) or 0.0
 
     return SummaryResponse(
         total_calls=total_calls,
@@ -258,145 +249,10 @@ async def get_summary(
         total_conversions=total_conversions,
         total_revenue=float(total_revenue),
         active_campaigns=active_campaigns,
-        avg_lead_score=round(float(voice_agg.avg_score or 0), 2),
-        avg_sentiment=round(float(voice_agg.avg_sentiment or 0), 2),
-        total_voice_analyses=int(voice_agg.total_analyses or 0),
+        avg_lead_score=round(float(avg_lead_score), 2),
+        avg_sentiment=round(float(avg_sentiment), 2),
+        total_voiceflow_conversations=total_calls,
     )
-
-
-# ── GET /emotions — Emotion distribution ─────────────────────────
-
-
-@router.get(
-    "/emotions",
-    response_model=list[EmotionDataPoint],
-    summary="Emotion distribution",
-)
-async def get_emotion_distribution(
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("analytics", "read")),
-) -> list[EmotionDataPoint]:
-    """Get emotion distribution over time from voice analyses."""
-    user_id = _get_user_id(current_user)
-    start, end = _parse_date_range(date_from, date_to)
-
-    rows = (
-        db.query(
-            VoiceAnalysis.emotion,
-            func.count(VoiceAnalysis.id).label("count"),
-        )
-        .filter(
-            VoiceAnalysis.user_id == user_id,
-            VoiceAnalysis.emotion.isnot(None),
-            VoiceAnalysis.created_at >= start,
-            VoiceAnalysis.created_at <= end,
-        )
-        .group_by(VoiceAnalysis.emotion)
-        .order_by(func.count(VoiceAnalysis.id).desc())
-        .all()
-    )
-
-    total = sum(row.count for row in rows) or 1
-    return [
-        EmotionDataPoint(
-            emotion=row.emotion.value if hasattr(row.emotion, "value") else str(row.emotion),
-            count=row.count,
-            percentage=round(row.count / total * 100, 2),
-        )
-        for row in rows
-    ]
-
-
-# ── GET /intents — Intent classification breakdown ───────────────
-
-
-@router.get(
-    "/intents",
-    response_model=list[IntentDataPoint],
-    summary="Intent classification breakdown",
-)
-async def get_intent_breakdown(
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("analytics", "read")),
-) -> list[IntentDataPoint]:
-    """Get intent classification breakdown from voice analyses."""
-    user_id = _get_user_id(current_user)
-    start, end = _parse_date_range(date_from, date_to)
-
-    rows = (
-        db.query(
-            VoiceAnalysis.intent,
-            func.count(VoiceAnalysis.id).label("count"),
-        )
-        .filter(
-            VoiceAnalysis.user_id == user_id,
-            VoiceAnalysis.intent.isnot(None),
-            VoiceAnalysis.created_at >= start,
-            VoiceAnalysis.created_at <= end,
-        )
-        .group_by(VoiceAnalysis.intent)
-        .order_by(func.count(VoiceAnalysis.id).desc())
-        .all()
-    )
-
-    total = sum(row.count for row in rows) or 1
-    return [
-        IntentDataPoint(
-            intent=row.intent.value if hasattr(row.intent, "value") else str(row.intent),
-            count=row.count,
-            percentage=round(row.count / total * 100, 2),
-        )
-        for row in rows
-    ]
-
-
-# ── GET /dialects — Dialect usage statistics ─────────────────────
-
-
-@router.get(
-    "/dialects",
-    response_model=list[DialectDataPoint],
-    summary="Dialect usage statistics",
-)
-async def get_dialect_stats(
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("analytics", "read")),
-) -> list[DialectDataPoint]:
-    """Get dialect usage statistics from voice analyses."""
-    user_id = _get_user_id(current_user)
-    start, end = _parse_date_range(date_from, date_to)
-
-    rows = (
-        db.query(
-            VoiceAnalysis.dialect,
-            func.count(VoiceAnalysis.id).label("count"),
-        )
-        .filter(
-            VoiceAnalysis.user_id == user_id,
-            VoiceAnalysis.dialect.isnot(None),
-            VoiceAnalysis.created_at >= start,
-            VoiceAnalysis.created_at <= end,
-        )
-        .group_by(VoiceAnalysis.dialect)
-        .order_by(func.count(VoiceAnalysis.id).desc())
-        .all()
-    )
-
-    total = sum(row.count for row in rows) or 1
-    return [
-        DialectDataPoint(
-            dialect=row.dialect.value if hasattr(row.dialect, "value") else str(row.dialect),
-            count=row.count,
-            percentage=round(row.count / total * 100, 2),
-        )
-        for row in rows
-    ]
 
 
 # ── GET /campaigns — Campaign performance comparison ─────────────
@@ -491,7 +347,6 @@ async def get_lead_funnel(
 
     total = sum(row.count for row in rows) or 1
 
-    # Define funnel order
     funnel_order = [
         LeadStatus.NEW,
         LeadStatus.CONTACTED,
@@ -513,7 +368,6 @@ async def get_lead_funnel(
             percentage=round(count / total * 100, 2),
         ))
 
-    # Include any extra statuses not in the funnel order
     for row in rows:
         if row.status not in funnel_order:
             status_name = row.status.value if hasattr(row.status, "value") else str(row.status)
@@ -553,19 +407,18 @@ async def get_trends(
 
     start, end = _parse_date_range(date_from, date_to, default_days=default_days)
 
-    # Build date-based aggregation for voice analyses (calls)
     if period == "monthly":
-        # Use extract for SQLite and PostgreSQL compatibility
         call_rows = (
             db.query(
-                extract("year", VoiceAnalysis.created_at).label("yr"),
-                extract("month", VoiceAnalysis.created_at).label("mn"),
-                func.count(VoiceAnalysis.id).label("count"),
+                extract("year", VoiceflowConversation.created_at).label("yr"),
+                extract("month", VoiceflowConversation.created_at).label("mn"),
+                func.count(VoiceflowConversation.id).label("count"),
             )
+            .join(Lead, VoiceflowConversation.lead_id == Lead.id)
             .filter(
-                VoiceAnalysis.user_id == user_id,
-                VoiceAnalysis.created_at >= start,
-                VoiceAnalysis.created_at <= end,
+                Lead.user_id == user_id,
+                VoiceflowConversation.created_at >= start,
+                VoiceflowConversation.created_at <= end,
             )
             .group_by("yr", "mn")
             .order_by("yr", "mn")
@@ -606,7 +459,6 @@ async def get_trends(
             .all()
         )
 
-        # Merge into a dict keyed by YYYY-MM
         data: dict[str, dict] = {}
         for row in call_rows:
             key = f"{int(row.yr):04d}-{int(row.mn):02d}"
@@ -627,16 +479,16 @@ async def get_trends(
         ]
 
     else:
-        # Daily (or weekly — we aggregate daily and let the frontend roll up weekly)
         call_rows = (
             db.query(
-                cast(VoiceAnalysis.created_at, Date).label("dt"),
-                func.count(VoiceAnalysis.id).label("count"),
+                cast(VoiceflowConversation.created_at, Date).label("dt"),
+                func.count(VoiceflowConversation.id).label("count"),
             )
+            .join(Lead, VoiceflowConversation.lead_id == Lead.id)
             .filter(
-                VoiceAnalysis.user_id == user_id,
-                VoiceAnalysis.created_at >= start,
-                VoiceAnalysis.created_at <= end,
+                Lead.user_id == user_id,
+                VoiceflowConversation.created_at >= start,
+                VoiceflowConversation.created_at <= end,
             )
             .group_by("dt")
             .order_by("dt")
@@ -690,7 +542,6 @@ async def get_trends(
             data.setdefault(key, {"calls": 0, "leads": 0, "conversions": 0, "revenue": 0.0})
             data[key]["revenue"] = float(row.revenue or 0)
 
-        # For weekly grouping, aggregate by ISO week
         if period == "weekly":
             weekly_data: dict[str, dict] = {}
             for date_str, vals in data.items():
@@ -753,7 +604,6 @@ async def custom_analytics_query(
                 detail="Invalid date_to format",
             )
 
-    # Grouping
     if body.group_by == "event_type":
         rows = (
             db.query(
@@ -846,7 +696,6 @@ async def custom_analytics_query(
                 ],
             }
         else:
-            # day
             rows = (
                 db.query(
                     cast(AnalyticsEvent.event_date, Date).label("dt"),
@@ -872,7 +721,6 @@ async def custom_analytics_query(
             }
 
     else:
-        # No grouping — return raw events (limited)
         events = (
             query.order_by(AnalyticsEvent.created_at.desc())
             .limit(body.limit)
@@ -904,7 +752,7 @@ async def custom_analytics_query(
     summary="Export analytics as CSV",
 )
 async def export_analytics(
-    export_type: str = Query("summary", description="summary, emotions, intents, campaigns, leads"),
+    export_type: str = Query("summary", description="summary, campaigns, leads"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -917,51 +765,7 @@ async def export_analytics(
     output = io.StringIO()
     writer = csv.writer(output)
 
-    if export_type == "emotions":
-        writer.writerow(["Emotion", "Count", "Percentage"])
-        rows = (
-            db.query(
-                VoiceAnalysis.emotion,
-                func.count(VoiceAnalysis.id).label("count"),
-            )
-            .filter(
-                VoiceAnalysis.user_id == user_id,
-                VoiceAnalysis.emotion.isnot(None),
-                VoiceAnalysis.created_at >= start,
-                VoiceAnalysis.created_at <= end,
-            )
-            .group_by(VoiceAnalysis.emotion)
-            .order_by(func.count(VoiceAnalysis.id).desc())
-            .all()
-        )
-        total = sum(r.count for r in rows) or 1
-        for r in rows:
-            emotion_name = r.emotion.value if hasattr(r.emotion, "value") else str(r.emotion)
-            writer.writerow([emotion_name, r.count, round(r.count / total * 100, 2)])
-
-    elif export_type == "intents":
-        writer.writerow(["Intent", "Count", "Percentage"])
-        rows = (
-            db.query(
-                VoiceAnalysis.intent,
-                func.count(VoiceAnalysis.id).label("count"),
-            )
-            .filter(
-                VoiceAnalysis.user_id == user_id,
-                VoiceAnalysis.intent.isnot(None),
-                VoiceAnalysis.created_at >= start,
-                VoiceAnalysis.created_at <= end,
-            )
-            .group_by(VoiceAnalysis.intent)
-            .order_by(func.count(VoiceAnalysis.id).desc())
-            .all()
-        )
-        total = sum(r.count for r in rows) or 1
-        for r in rows:
-            intent_name = r.intent.value if hasattr(r.intent, "value") else str(r.intent)
-            writer.writerow([intent_name, r.count, round(r.count / total * 100, 2)])
-
-    elif export_type == "campaigns":
+    if export_type == "campaigns":
         writer.writerow([
             "Campaign ID", "Name", "Status", "Platform", "Budget (INR)",
             "Spent (INR)", "Impressions", "Clicks", "Conversions", "CTR%", "CVR%",
@@ -1015,11 +819,11 @@ async def export_analytics(
             ])
 
     else:
-        # summary export
         writer.writerow(["Metric", "Value"])
         total_calls = (
-            db.query(func.count(VoiceAnalysis.id))
-            .filter(VoiceAnalysis.user_id == user_id, VoiceAnalysis.created_at >= start, VoiceAnalysis.created_at <= end)
+            db.query(func.count(VoiceflowConversation.id))
+            .join(Lead, VoiceflowConversation.lead_id == Lead.id)
+            .filter(Lead.user_id == user_id, VoiceflowConversation.created_at >= start, VoiceflowConversation.created_at <= end)
             .scalar()
         ) or 0
         total_leads = (

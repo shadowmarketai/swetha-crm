@@ -12,11 +12,6 @@ from api.schemas.auth import (
     UserResponse,
     UserUpdate,
 )
-from api.schemas.voice import (
-    VoiceAnalysisResponse,
-    VoiceProcessRequest,
-    VoiceProcessResponse,
-)
 from api.schemas.crm import (
     ActivityCreate,
     ActivityResponse,
@@ -91,10 +86,6 @@ __all__ = [
     "TokenResponse",
     "UserResponse",
     "UserUpdate",
-    # Voice
-    "VoiceAnalysisResponse",
-    "VoiceProcessRequest",
-    "VoiceProcessResponse",
     # CRM
     "ActivityCreate",
     "ActivityResponse",

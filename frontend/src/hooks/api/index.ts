@@ -80,28 +80,6 @@ export {
   type ActivityCreatePayload,
 } from './useActivities';
 
-// ── Voice AI ──
-export {
-  useVoiceAnalyses,
-  useVoiceAnalysis,
-  useVoiceTranscript,
-  useVoiceRecording,
-  useLiveCalls,
-  useVoiceStats,
-  useProcessVoice,
-  useProcessVoiceFile,
-  useAssistants,
-  useAssistant,
-  useCreateAssistant,
-  useUpdateAssistant,
-  useDeleteAssistant,
-  useStartAssistant,
-  useStopAssistant,
-  voiceKeys,
-  assistantKeys,
-  type AssistantCreatePayload,
-} from './useVoice';
-
 // ── Campaigns ──
 export {
   useCampaigns,
@@ -121,10 +99,6 @@ export {
 // ── Analytics ──
 export {
   useAnalyticsSummary,
-  useCallVolumeStats,
-  useEmotionStats,
-  useConversionStats,
-  useIntentStats,
   useExportReport,
   analyticsKeys,
 } from './useAnalytics';
@@ -186,28 +160,6 @@ export {
   leadSourceKeys,
 } from './useLeadSources';
 
-// ── Dialer ──
-export {
-  useDialerCampaigns,
-  useDialerCampaign,
-  useDialerCampaignStats,
-  useDialerContacts,
-  useDialerCalls,
-  useDNCList,
-  useCreateDialerCampaign,
-  useUpdateDialerCampaign,
-  useDeleteDialerCampaign,
-  useAddDialerContacts,
-  useInitiateDialerCall,
-  useCompleteDialerCall,
-  useAddDNC,
-  useRemoveDNC,
-  dialerKeys,
-  type DialerCampaignCreatePayload,
-  type DialerContactPayload,
-  type DialerCallCompletePayload,
-} from './useDialer';
-
 // ── Dashboard ──
 export {
   useDashboardStats,
@@ -215,25 +167,6 @@ export {
   dashboardKeys,
   type CRMDashboardStats,
 } from './useDashboard';
-
-// ── Voice Agent (Cloned Voices, Knowledge, Recordings) ──
-export {
-  useClonedVoices,
-  useClonedVoice,
-  useCloneVoice,
-  useDeleteVoice,
-  useTestVoice,
-  useKnowledgeDocs,
-  useAddKnowledge,
-  useBulkAddKnowledge,
-  useUpdateKnowledge,
-  useDeleteKnowledge,
-  useAgentRecordings,
-  useAgentRecording,
-  useRecordingStats,
-  useAnalyzeRecording,
-  voiceAgentKeys,
-} from './useVoiceAgent';
 
 // ── PEB Quotation ──
 export {

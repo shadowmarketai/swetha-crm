@@ -3,11 +3,10 @@
  *
  * Shows EVERYTHING linked to a lead in one view:
  *   - Lead info (name, email, phone, company, status, score)
- *   - Company details (if linked)
- *   - Contacts at that company
  *   - Deals in pipeline
  *   - Quotations generated
  *   - Activities (calls, emails, meetings, notes)
+ *   - VoiceFlow conversations + recordings (synced from external SaaS)
  *   - Helpdesk tickets
  *   - Real-time updates via WebSocket
  */
@@ -16,15 +15,16 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Phone, Mail, Building2, User, IndianRupee, FileText,
-  Calendar, MessageSquare, CheckCircle, Clock, Target, TrendingUp,
-  Edit, Trash2, Plus, Send, Activity, Headphones, ChevronRight,
+  Phone, Mail, Building2, User, IndianRupee, FileText,
+  Calendar, MessageSquare, Target, TrendingUp,
+  Edit, Plus, Send, Activity, Headphones, ChevronRight,
+  Mic, PlayCircle, Clock,
 } from 'lucide-react'
 import {
   Card, CardHeader, CardBody, Stat, Button, PageHeader, Badge,
-  StatusBadge, Avatar, EmptyState, Skeleton, Tabs,
+  StatusBadge, EmptyState, Skeleton, Tabs,
 } from '../../components/ui/primitives'
-import api, { leadsAPI, quotationAPI } from '../../services/api'
+import api, { quotationAPI, voiceflowAPI } from '../../services/api'
 import { useRealtimeEvent } from '../../contexts/RealtimeContext'
 
 const fmtINR = (n) => n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -37,18 +37,30 @@ export default function LeadDetail360() {
   const [quotations, setQuotations] = useState([])
   const [activities, setActivities] = useState([])
   const [tickets, setTickets] = useState([])
+  const [conversations, setConversations] = useState([])
+  const [conversationDetails, setConversationDetails] = useState({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
+  const [pushingToVoiceflow, setPushingToVoiceflow] = useState(false)
+
+  const loadConversations = async () => {
+    try {
+      const res = await voiceflowAPI.listConversationsForLead(leadId)
+      const list = Array.isArray(res?.data) ? res.data : res?.data?.items || []
+      setConversations(list)
+    } catch {
+      // VoiceFlow integration may be unconfigured — render empty state silently
+      setConversations([])
+    }
+  }
 
   const loadAll = async () => {
     setLoading(true)
     try {
-      // Fetch lead
       const leadRes = await api.get(`/api/v1/crm-leads/${leadId}`)
       const leadData = leadRes.data
       setLead(leadData)
 
-      // Fetch linked data in parallel
       const [dealsRes, activitiesRes, quotationsRes, ticketsRes] = await Promise.allSettled([
         api.get('/api/v1/crm-deals', { params: { limit: 50, lead_id: String(leadId) } }),
         api.get('/api/v1/crm-activities', { params: { limit: 50, lead_id: leadId } }),
@@ -73,10 +85,37 @@ export default function LeadDetail360() {
         setTickets(Array.isArray(t) ? t : t?.items || [])
       }
 
+      await loadConversations()
+
     } catch (err) {
       toast.error('Failed to load lead details')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchConversationDetail = async (conversationId) => {
+    if (conversationDetails[conversationId]) return
+    try {
+      const res = await voiceflowAPI.getConversation(conversationId)
+      setConversationDetails((prev) => ({ ...prev, [conversationId]: res.data }))
+    } catch {
+      toast.error('Could not load conversation transcript')
+    }
+  }
+
+  const handlePushToVoiceflow = async () => {
+    setPushingToVoiceflow(true)
+    try {
+      const res = await voiceflowAPI.pushLead(leadId)
+      toast.success(res?.data?.message || 'Lead sent to VoiceFlow')
+      await loadConversations()
+      setActiveTab('conversations')
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'VoiceFlow push failed'
+      toast.error(detail)
+    } finally {
+      setPushingToVoiceflow(false)
     }
   }
 
@@ -89,6 +128,9 @@ export default function LeadDetail360() {
   useRealtimeEvent('deal.created', () => loadAll())
   useRealtimeEvent('deal.updated', () => loadAll())
   useRealtimeEvent('activity.created', () => loadAll())
+  useRealtimeEvent('voiceflow.conversation.updated', (payload) => {
+    if (String(payload?.lead_id) === String(leadId)) loadConversations()
+  })
 
   if (loading) {
     return (
@@ -113,6 +155,7 @@ export default function LeadDetail360() {
     { value: 'deals', label: 'Deals', count: deals.length },
     { value: 'quotes', label: 'Quotations', count: quotations.length },
     { value: 'activities', label: 'Activities', count: activities.length },
+    { value: 'conversations', label: 'VoiceFlow', count: conversations.length },
     { value: 'tickets', label: 'Tickets', count: tickets.length },
   ]
 
@@ -160,7 +203,15 @@ export default function LeadDetail360() {
           <CardHeader title="Quick Actions" />
           <CardBody>
             <div className="space-y-2">
-              <Button variant="secondary" className="w-full justify-start" leftIcon={Phone} onClick={() => toast('Call feature coming soon')}>Call {leadName}</Button>
+              <Button
+                variant="secondary"
+                className="w-full justify-start"
+                leftIcon={Mic}
+                onClick={handlePushToVoiceflow}
+                disabled={pushingToVoiceflow}
+              >
+                {pushingToVoiceflow ? 'Sending to VoiceFlow…' : 'Send to VoiceFlow'}
+              </Button>
               <Button variant="secondary" className="w-full justify-start" leftIcon={Mail} onClick={() => window.open(`mailto:${lead.email}`)}>Send Email</Button>
               <Button variant="secondary" className="w-full justify-start" leftIcon={MessageSquare} onClick={() => toast('WhatsApp integration coming soon')}>WhatsApp</Button>
               <Button variant="secondary" className="w-full justify-start" leftIcon={Calendar} onClick={() => navigate('/appointments')}>Book Meeting</Button>
@@ -318,6 +369,139 @@ export default function LeadDetail360() {
                     <Badge tone="default">{a.activity_type}</Badge>
                   </div>
                 ))}
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
+      {activeTab === 'conversations' && (
+        <Card>
+          <CardHeader
+            action={
+              <Button size="sm" leftIcon={Send} onClick={handlePushToVoiceflow} disabled={pushingToVoiceflow}>
+                {pushingToVoiceflow ? 'Sending…' : 'Send to VoiceFlow'}
+              </Button>
+            }
+          />
+          <CardBody>
+            {conversations.length === 0 ? (
+              <EmptyState
+                icon={Mic}
+                title="No VoiceFlow conversations yet"
+                description="Push this lead to VoiceFlow to start an AI voice conversation. Transcripts and recordings will appear here."
+                action={
+                  <Button leftIcon={Send} onClick={handlePushToVoiceflow} disabled={pushingToVoiceflow}>
+                    {pushingToVoiceflow ? 'Sending…' : 'Send to VoiceFlow'}
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="space-y-3">
+                {conversations.map((c) => {
+                  const detail = conversationDetails[c.id]
+                  const isExpanded = !!detail
+                  return (
+                    <div
+                      key={c.id}
+                      className="rounded-xl border border-slate-100 dark:border-slate-800 hover:border-amber-200 transition-colors"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => fetchConversationDetail(c.id)}
+                        className="w-full flex items-start gap-3 p-4 text-left"
+                      >
+                        <div className="w-9 h-9 rounded-lg bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 flex items-center justify-center flex-shrink-0">
+                          <Mic className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                              {c.summary || `Conversation ${c.voiceflow_session_id?.slice(0, 8)}…`}
+                            </p>
+                            <StatusBadge status={c.status} />
+                            {c.primary_intent && <Badge tone="info">{c.primary_intent}</Badge>}
+                            {c.recording_count > 0 && (
+                              <Badge tone="default">{c.recording_count} recording{c.recording_count === 1 ? '' : 's'}</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                            {c.started_at && (
+                              <span className="inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {new Date(c.started_at).toLocaleString()}
+                              </span>
+                            )}
+                            {c.duration_sec > 0 && <span>{Math.round(c.duration_sec)}s</span>}
+                            {typeof c.sentiment === 'number' && c.sentiment !== 0 && (
+                              <span>sentiment {c.sentiment.toFixed(2)}</span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className={`w-4 h-4 text-slate-400 mt-1 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 space-y-3 bg-slate-50/60 dark:bg-slate-900/40">
+                          {detail.recordings?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Recordings</p>
+                              <div className="space-y-2">
+                                {detail.recordings.map((r) => (
+                                  <div key={r.id} className="flex items-center gap-2">
+                                    <PlayCircle className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <audio
+                                      controls
+                                      preload="none"
+                                      src={r.recording_url}
+                                      className="flex-1 h-8"
+                                    />
+                                    <span className="text-xs text-slate-500 flex-shrink-0">{Math.round(r.duration_sec || 0)}s</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {detail.full_transcript_text && (
+                            <div>
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Transcript</p>
+                              <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                                {detail.full_transcript_text}
+                              </p>
+                            </div>
+                          )}
+
+                          {!detail.full_transcript_text && detail.transcript?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Transcript</p>
+                              <div className="space-y-1">
+                                {detail.transcript.map((line, idx) => (
+                                  <p key={idx} className="text-sm">
+                                    <span className="font-semibold text-slate-600 dark:text-slate-400 mr-2">
+                                      {(line.speaker || 'speaker').toLowerCase()}:
+                                    </span>
+                                    <span className="text-slate-700 dark:text-slate-300">{line.text}</span>
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {(detail.primary_emotion || detail.detected_dialect || detail.lead_score != null) && (
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              {detail.primary_emotion && <Badge tone="info">emotion: {detail.primary_emotion}</Badge>}
+                              {detail.detected_dialect && <Badge tone="default">dialect: {detail.detected_dialect}</Badge>}
+                              {detail.lead_score != null && (
+                                <Badge tone="success">VoiceFlow score: {Number(detail.lead_score).toFixed(2)}</Badge>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </CardBody>

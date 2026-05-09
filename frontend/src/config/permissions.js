@@ -6,7 +6,6 @@
 const PERMISSION_MATRIX = {
   admin: {
     crm: new Set(['create', 'read', 'update', 'delete']),
-    voiceAI: new Set(['create', 'read', 'update', 'delete']),
     campaigns: new Set(['create', 'read', 'update', 'delete']),
     analytics: new Set(['create', 'read', 'update', 'delete']),
     helpdesk: new Set(['create', 'read', 'update', 'delete']),
@@ -23,7 +22,6 @@ const PERMISSION_MATRIX = {
   },
   manager: {
     crm: new Set(['create', 'read', 'update', 'delete']),
-    voiceAI: new Set(['create', 'read', 'update', 'delete']),
     campaigns: new Set(['create', 'read', 'update', 'delete']),
     analytics: new Set(['read']),
     helpdesk: new Set(['create', 'read', 'update']),
@@ -40,7 +38,6 @@ const PERMISSION_MATRIX = {
   },
   agent: {
     crm: new Set(['create', 'read', 'update']),
-    voiceAI: new Set(['create', 'read', 'update']),
     campaigns: new Set([]),
     analytics: new Set(['read']),
     helpdesk: new Set(['create', 'read', 'update']),
@@ -57,7 +54,6 @@ const PERMISSION_MATRIX = {
   },
   user: {
     crm: new Set(['read']),
-    voiceAI: new Set(['read']),
     campaigns: new Set([]),
     analytics: new Set(['read']),
     helpdesk: new Set(['create', 'read', 'update']),
@@ -74,7 +70,6 @@ const PERMISSION_MATRIX = {
   },
   viewer: {
     crm: new Set(['read']),
-    voiceAI: new Set(['read']),
     campaigns: new Set(['read']),
     analytics: new Set(['read']),
     helpdesk: new Set([]),

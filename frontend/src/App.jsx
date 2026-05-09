@@ -1,7 +1,8 @@
 /**
  * Swetha Structures CRM - App Router
  *
- * WORKFLOW: CRM → Voice AI → Quotation → Appointments
+ * WORKFLOW: CRM → VoiceFlow (external SaaS) → Quotation → Appointments
+ * Voice conversations + recordings flow back into the lead detail page.
  * Automation orchestrates | Inbox for messaging | Reports for analytics
  */
 
@@ -28,14 +29,6 @@ const ActivitiesPage = lazy(() => import('./modules/crm/SubPages').then(m => ({ 
 const TasksPage = lazy(() => import('./modules/crm/CRMSubPages2').then(m => ({ default: m.TasksPage })))
 const CRMSettingsPage = lazy(() => import('./modules/crm/CRMSettings').then(m => ({ default: m.CRMSettingsPage })))
 const LeadSourcesPage = lazy(() => import('./modules/crm/LeadSourcesPage'))
-
-// Voice AI Integration (monitoring dashboard for external platform)
-const VoiceAIOverview = lazy(() => import('./modules/voice-ai/VoiceAIOverview'))
-const VoiceLiveCalls = lazy(() => import('./modules/voice-ai/LiveCalls'))
-const VoiceAgents = lazy(() => import('./modules/voice-ai/AIAgents'))
-const VoiceCampaigns = lazy(() => import('./modules/voice-ai/Campaigns'))
-const VoiceCallLogs = lazy(() => import('./modules/voice-ai/CallLogs'))
-const VoiceAnalytics = lazy(() => import('./modules/voice-ai/Analytics'))
 
 // ── Quotation Module ──
 const QuotationDashboard = lazy(() => import('./modules/quotation/QuotationDashboard'))
@@ -152,18 +145,6 @@ function App() {
               <Route path="crm/tasks" element={<RoleGatedRoute module="crm"><S><TasksPage /></S></RoleGatedRoute>} />
               <Route path="crm/settings" element={<RoleGatedRoute module="crm"><S><CRMSettingsPage /></S></RoleGatedRoute>} />
               <Route path="crm/lead-sources" element={<RoleGatedRoute module="crm"><S><LeadSourcesPage /></S></RoleGatedRoute>} />
-            </>
-          )}
-
-          {/* Voice AI Integration (monitoring dashboard) */}
-          {isModuleEnabled(features, 'voiceAI') && (
-            <>
-              <Route path="voice" element={<RoleGatedRoute module="voiceAI"><S><VoiceAIOverview /></S></RoleGatedRoute>} />
-              <Route path="voice/live-calls" element={<RoleGatedRoute module="voiceAI"><S><VoiceLiveCalls /></S></RoleGatedRoute>} />
-              <Route path="voice/agents" element={<RoleGatedRoute module="voiceAI"><S><VoiceAgents /></S></RoleGatedRoute>} />
-              <Route path="voice/campaigns" element={<RoleGatedRoute module="voiceAI"><S><VoiceCampaigns /></S></RoleGatedRoute>} />
-              <Route path="voice/call-logs" element={<RoleGatedRoute module="voiceAI"><S><VoiceCallLogs /></S></RoleGatedRoute>} />
-              <Route path="voice/analytics" element={<RoleGatedRoute module="voiceAI"><S><VoiceAnalytics /></S></RoleGatedRoute>} />
             </>
           )}
 

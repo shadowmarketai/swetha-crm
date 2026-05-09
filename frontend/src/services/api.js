@@ -80,17 +80,20 @@ export const authAPI = {
 };
 
 // ============================================
-// VOICE CALLS API
+// VOICEFLOW INTEGRATION API
 // ============================================
-export const callsAPI = {
-  // Voice calls are on the external Voice AI platform — silence 404s
-  getAll: (params) => api.get('/api/v1/calls', { params, _silent: true }),
-  getById: (id) => api.get(`/api/v1/calls/${id}`, { _silent: true }),
-  getTranscript: (id) => api.get(`/api/v1/calls/${id}/transcript`, { _silent: true }),
-  getRecording: (id) => api.get(`/api/v1/calls/${id}/recording`, { _silent: true }),
-  makeCall: (data) => api.post('/api/v1/calls/outbound', data, { _silent: true }),
-  getAnalytics: (params) => api.get('/api/v1/calls/analytics', { params, _silent: true }),
-  getLiveCalls: () => api.get('/api/v1/calls/live', { _silent: true }),
+// Push leads to the external VoiceFlow SaaS, list/fetch the conversations +
+// recordings it produces. Recording media stays on VoiceFlow's CDN — we only
+// store URLs in the CRM.
+export const voiceflowAPI = {
+  pushLead: (leadId, agentId) =>
+    api.post(`/api/v1/voiceflow/leads/${leadId}/push`, null, {
+      params: agentId ? { agent_id: agentId } : undefined,
+    }),
+  listConversationsForLead: (leadId) =>
+    api.get(`/api/v1/voiceflow/leads/${leadId}/conversations`),
+  getConversation: (conversationId) =>
+    api.get(`/api/v1/voiceflow/conversations/${conversationId}`),
 };
 
 // ============================================
@@ -126,36 +129,6 @@ export const leadsAPI = {
   
   // Get pipeline stats
   getPipeline: () => api.get('/api/v1/crm-leads/pipeline'),
-};
-
-// ============================================
-// AI ASSISTANTS API
-// ============================================
-export const assistantsAPI = {
-  // Get all assistants
-  getAll: () => api.get('/api/v1/assistants', { _silent: true }),
-  
-  // Get single assistant
-  getById: (id) => api.get(`/api/v1/assistants/${id}`),
-  
-  // Create assistant
-  create: (data) => api.post('/api/v1/assistants', data),
-  
-  // Update assistant
-  update: (id, data) => api.put(`/api/v1/assistants/${id}`, data),
-  
-  // Delete assistant
-  delete: (id) => api.delete(`/api/v1/assistants/${id}`),
-  
-  // Start/Stop assistant
-  start: (id) => api.post(`/api/v1/assistants/${id}/start`),
-  stop: (id) => api.post(`/api/v1/assistants/${id}/stop`),
-  
-  // Get assistant stats
-  getStats: (id) => api.get(`/api/v1/assistants/${id}/stats`),
-  
-  // Get available voices
-  getVoices: () => api.get('/api/v1/assistants/voices'),
 };
 
 // ============================================
@@ -295,32 +268,6 @@ export const analyticsAPI = {
   
   // Export report
   exportReport: (params) => api.get('/api/v1/analytics/export', { params, responseType: 'blob' }),
-};
-
-// ============================================
-// TTS / VOICE STUDIO API
-// ============================================
-export const ttsAPI = {
-  // Synthesize text to speech (voice router)
-  synthesize: (data) => api.post('/api/v1/voice/synthesize', data),
-
-  // List built-in TTS voices
-  listVoices: (language) => api.get('/api/v1/voice/voices', { params: { language } }),
-
-  // Clone a voice (voice agent router)
-  cloneVoice: (formData) => api.post('/api/v1/agent/voices/clone', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }),
-
-  // Delete a cloned voice
-  deleteVoice: (voiceId) => api.delete(`/api/v1/agent/voices/${voiceId}`),
-
-  // Test a cloned voice
-  testVoice: (voiceId, text) => api.post(`/api/v1/agent/voices/${voiceId}/test`, { text }),
-
-  // List cloned voices
-  listClonedVoices: (tenantId = 'default') =>
-    api.get('/api/v1/agent/voices', { params: { tenant_id: tenantId } }),
 };
 
 // ============================================
@@ -591,39 +538,6 @@ export const usersAPI = {
   invite: (data) => api.post('/api/v1/users/invite', data),
   remove: (id) => api.delete(`/api/v1/users/${id}`),
   getPermissions: () => api.get('/api/v1/auth/permissions'),
-};
-
-// ============================================
-// VOICE AGENT API (Cloned Voices, Knowledge, Recordings)
-// ============================================
-export const voiceAgentAPI = {
-  // Voices
-  cloneVoice: (formData) => api.post('/api/v1/agent/voices/clone', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }),
-  listVoices: (tenantId = 'default', activeOnly = true) =>
-    api.get('/api/v1/agent/voices', { params: { tenant_id: tenantId, active_only: activeOnly } }),
-  getVoice: (voiceId) => api.get(`/api/v1/agent/voices/${voiceId}`),
-  deleteVoice: (voiceId) => api.delete(`/api/v1/agent/voices/${voiceId}`),
-  testVoice: (voiceId, text) => api.post(`/api/v1/agent/voices/${voiceId}/test`, { text }),
-
-  // Knowledge
-  addKnowledge: (payload) => api.post('/api/v1/agent/knowledge', payload),
-  bulkAddKnowledge: (payload) => api.post('/api/v1/agent/knowledge/bulk', payload),
-  listKnowledge: (tenantId = 'default', docType, agentId) =>
-    api.get('/api/v1/agent/knowledge', { params: { tenant_id: tenantId, doc_type: docType, agent_id: agentId } }),
-  updateKnowledge: (docId, updates) => api.put(`/api/v1/agent/knowledge/${docId}`, updates),
-  deleteKnowledge: (docId) => api.delete(`/api/v1/agent/knowledge/${docId}`),
-
-  // Recordings
-  listRecordings: (tenantId, limit = 50) =>
-    api.get('/api/v1/agent/recordings', { params: { tenant_id: tenantId, limit } }),
-  getRecordingStats: (tenantId) =>
-    api.get('/api/v1/agent/recordings/stats', { params: { tenant_id: tenantId } }),
-  getRecording: (recordingId) => api.get(`/api/v1/agent/recordings/${recordingId}`),
-  getRecordingAudio: (recordingId) =>
-    api.get(`/api/v1/agent/recordings/${recordingId}/audio`, { responseType: 'blob' }),
-  analyzeRecording: (recordingId) => api.post(`/api/v1/agent/recordings/${recordingId}/analyze`),
 };
 
 // ============================================

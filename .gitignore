@@ -15,8 +15,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -82,9 +82,11 @@ htmlcov/
 .nox/
 
 # ----- Data, Models, Logs -----
-data/
-models/
-logs/
+# Anchored to root: these are ML artifact / data dirs at the repo root,
+# NOT the SQLAlchemy `src/api/models/` package or any source `data/` dirs.
+/data/
+/models/
+/logs/
 *.wav
 *.mp3
 *.ogg

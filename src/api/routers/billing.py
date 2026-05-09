@@ -596,7 +596,7 @@ async def get_usage(
     campaigns, etc. and compares against the plan's limits.
     """
     from api.models.crm import Lead
-    from api.models.voice import VoiceAnalysis
+    from api.models.voiceflow import VoiceflowConversation
     from api.models.campaign import Campaign as CampaignModel
     from sqlalchemy import func
 
@@ -630,16 +630,19 @@ async def get_usage(
         .scalar()
     ) or 0
 
+    # Count VoiceFlow conversations for this user via Lead.user_id join
     voice_count = (
-        db.query(func.count(VoiceAnalysis.id))
-        .filter(VoiceAnalysis.user_id == numeric_uid)
+        db.query(func.count(VoiceflowConversation.id))
+        .join(Lead, VoiceflowConversation.lead_id == Lead.id)
+        .filter(Lead.user_id == numeric_uid)
         .scalar()
     ) or 0
 
-    # Estimate call minutes from voice analysis durations
+    # Estimate call minutes from VoiceFlow conversation durations
     total_call_seconds = (
-        db.query(func.coalesce(func.sum(VoiceAnalysis.audio_duration_seconds), 0))
-        .filter(VoiceAnalysis.user_id == numeric_uid)
+        db.query(func.coalesce(func.sum(VoiceflowConversation.duration_sec), 0))
+        .join(Lead, VoiceflowConversation.lead_id == Lead.id)
+        .filter(Lead.user_id == numeric_uid)
         .scalar()
     ) or 0
     call_minutes_used = int(total_call_seconds / 60)
@@ -662,7 +665,7 @@ async def get_usage(
         usage={
             "leads": lead_count,
             "call_minutes": call_minutes_used,
-            "voice_analyses": voice_count,
+            "voiceflow_conversations": voice_count,
             "campaigns": campaign_count,
         },
         limits={

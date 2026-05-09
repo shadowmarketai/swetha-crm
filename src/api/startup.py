@@ -192,7 +192,7 @@ def setup_sentry():
 
 def run_startup_checks():
     """Run all startup checks. Call this from server.py on_event('startup')."""
-    print("\n=== VoiceFlow AI — Startup Checks ===")
+    print("\n=== Swetha CRM — Startup Checks ===")
 
     print("\n[1/3] Environment validation:")
     validate_environment()
