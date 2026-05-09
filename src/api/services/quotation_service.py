@@ -78,7 +78,12 @@ def create_quotation(
     """Create a new quotation, optionally linked to a CRM lead."""
     lead = None
     if lead_id:
-        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        # SECURITY: filter by user_id so a tenant can't attach another tenant's
+        # lead to their quotation by guessing the lead's integer ID.
+        lead = db.query(Lead).filter(
+            Lead.id == lead_id,
+            Lead.user_id == user_id,
+        ).first()
         if not lead:
             raise ValueError(f"Lead {lead_id} not found")
 
@@ -165,7 +170,11 @@ def update_quotation(
 
 
 def generate_pdf(db: Session, quotation_id: int, user_id: str) -> bytes:
-    """Generate PDF for a quotation. SECURITY: caller must own the quotation."""
+    """Generate PDF for a quotation.
+
+    SECURITY: filters on user_id so one tenant cannot generate (and thereby
+    read) another tenant's quotation PDF by guessing its integer ID.
+    """
     quotation = db.query(Quotation).filter(
         Quotation.id == quotation_id,
         Quotation.user_id == user_id,

@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "Swetha Structures CRM + Quotation"
     APP_VERSION: str = "1.0.0"
     APP_ENV: str = "development"
-    DEBUG: bool = True
+    # SECURITY: default to False so a misconfigured prod deploy does not leak
+    # full Python tracebacks. Override to True only in local .env files.
+    DEBUG: bool = False
 
     # ── Database ─────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/swetha_crm"
@@ -104,12 +106,32 @@ class Settings(BaseSettings):
 # Singleton instance
 settings = Settings()
 
-# SECURITY: Warn if default secret key is used in non-dev environments
+# ── Production guardrails ───────────────────────────────────────
+# These checks intentionally HARD-FAIL when running outside development with
+# unsafe defaults. A misconfigured deployment is better caught at boot than
+# silently shipping a forgeable JWT signing key or a wildcard CORS policy.
 import logging as _logging
 _logger = _logging.getLogger(__name__)
-if settings.APP_ENV != "development" and "dev-only" in settings.SECRET_KEY:
-    _logger.critical(
-        "SECURITY: SECRET_KEY is still the default value! "
-        "Set SECRET_KEY environment variable before deploying to production. "
-        "Generate one with: python -c \"import secrets; print(secrets.token_hex(64))\""
-    )
+
+if settings.APP_ENV not in ("development", "testing"):
+    # JWT signing key must be overridden — otherwise every token is forgeable
+    # by anyone with read access to the source tree.
+    if "dev-only" in settings.SECRET_KEY or len(settings.SECRET_KEY) < 32:
+        raise RuntimeError(
+            "SECURITY: SECRET_KEY is the development default or too short. "
+            "Set SECRET_KEY env var to a 64+ char random string before starting. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(64))\""
+        )
+    # Wildcard origins with credentials = every authenticated endpoint is
+    # readable from any web origin. This is almost always a misconfiguration.
+    if "*" in settings.ALLOWED_ORIGINS:
+        raise RuntimeError(
+            "SECURITY: ALLOWED_ORIGINS contains '*' in a non-development environment. "
+            "Set ALLOWED_ORIGINS to an explicit comma-separated list of trusted origins."
+        )
+    # DEBUG=True in prod leaks tracebacks. Refuse to start.
+    if settings.DEBUG:
+        raise RuntimeError(
+            "SECURITY: DEBUG=True is not allowed outside APP_ENV=development. "
+            "Set DEBUG=False in production."
+        )

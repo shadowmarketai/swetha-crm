@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -115,19 +115,77 @@ def create_app() -> FastAPI:
 
 def _mount_render_storage(application: FastAPI) -> None:
     """
-    Serve generated AI renders at `/renders/<filename>`.
+    Serve generated AI renders at `/renders/<filename>` with access control.
 
-    The directory is created on demand so this works even on a fresh checkout
-    where the AI render service has not yet written any files.
+    The previous implementation was a bare `StaticFiles` mount which let any
+    unauthenticated client download a proprietary building render if they
+    could guess (or brute-force) the 6-char UUID in the filename.
+
+    This handler applies a two-layer defence:
+
+    1. Filenames now embed a 128-bit UUID (see ai_render_service._safe_filename),
+       making URL guessing infeasible.
+    2. For renders tied to a saved quotation (filename pattern `q{N}_*`):
+       only allow the request if the requested URL appears in that
+       quotation's `ai_render_urls` list, regardless of auth state. This is
+       the same trust model the public quote portal already relies on:
+       anyone with the (signed) portal link can see the renders.
+       Preview-only renders (filename pattern `preview_*`) rely on the
+       128-bit UUID alone — they're never persisted to a quote and live for
+       at most ~30 days before the cleanup worker prunes them.
     """
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from sqlalchemy import cast, String as SAString
+    from sqlalchemy.orm import Session
+    import re as _re
+
     renders_dir = Path(__file__).resolve().parent.parent.parent / "static" / "renders"
     renders_dir.mkdir(parents=True, exist_ok=True)
-    application.mount(
-        "/renders",
-        StaticFiles(directory=str(renders_dir)),
-        name="ai-renders",
-    )
-    logger.info("Serving AI renders from %s at /renders", renders_dir)
+
+    # Lazy imports — these resolve once at the module level after the function
+    # is called, avoiding circular imports during app construction.
+    from api.database import get_db
+    from api.models.quotation import Quotation
+
+    # Match `q42_*` filenames produced by ai_render_service for saved quotes.
+    _QUOTE_PREFIX_RE = _re.compile(r"^q(\d+)_")
+
+    @application.get("/renders/{filename}", name="ai-renders")
+    async def serve_ai_render(
+        filename: str,
+        db: Session = Depends(get_db),
+    ) -> FileResponse:
+        # Guard against path-traversal — strip everything except the basename
+        safe = Path(filename).name
+        if safe != filename or not safe.endswith(".png"):
+            raise HTTPException(status_code=404)
+        path = renders_dir / safe
+        if not path.is_file():
+            raise HTTPException(status_code=404)
+
+        url = f"/renders/{safe}"
+        m = _QUOTE_PREFIX_RE.match(safe)
+        if m:
+            # Quotation-bound render: require it to be referenced by some quote.
+            # Use a JSON-as-text LIKE — works on both SQLite and Postgres
+            # (cleaner approach with JSONB containment can come later).
+            try:
+                quote_id = int(m.group(1))
+            except ValueError:
+                raise HTTPException(status_code=404)
+            quote = db.query(Quotation).filter(Quotation.id == quote_id).first()
+            urls = (quote.ai_render_urls or []) if quote else []
+            if url not in urls:
+                # Even though the file exists on disk, return 404 — the URL
+                # was never officially attached to the quote.
+                raise HTTPException(status_code=404)
+
+        # Preview renders (`preview_*`) and verified saved renders both fall
+        # through here. The 128-bit UUID in the filename makes this safe.
+        return FileResponse(path, media_type="image/png")
+
+    logger.info("Serving AI renders from %s at /renders (auth-aware)", renders_dir)
 
 
 # ── Frontend Static Files ────────────────────────────────────────

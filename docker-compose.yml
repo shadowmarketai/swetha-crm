@@ -16,9 +16,12 @@ services:
       - "8000:8000"
     environment:
       - APP_ENV=production
-      - DATABASE_URL=postgresql://postgres:password@db:5432/voiceflow
       - REDIS_URL=redis://redis:6379/0
       - WHISPER_MODEL_SIZE=base
+    # SECURITY: DATABASE_URL, SECRET_KEY, GEMINI_API_KEY, etc. all come from
+    # .env (or the Coolify environment-variable UI). Do NOT hard-code secrets
+    # in this file — env_file values are not enough to override anything set
+    # explicitly in the `environment:` block.
     env_file:
       - .env
     volumes:
@@ -53,18 +56,21 @@ services:
     image: pgvector/pgvector:pg15
     container_name: voiceflow-db
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=voiceflow
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      - POSTGRES_DB=${POSTGRES_DB:-voiceflow}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # SECURITY: do NOT publish port 5432 to the host. Containers on the same
+    # Docker network reach the DB by name (`db:5432`). Exposing this on a
+    # Coolify VPS would put the database directly on the public internet.
+    expose:
+      - "5432"
     restart: unless-stopped
     networks:
       - voiceflow-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -73,8 +79,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: voiceflow-redis
-    ports:
-      - "6379:6379"
+    # SECURITY: do NOT publish 6379 to the host. Internal-only.
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -87,14 +94,17 @@ services:
       retries: 5
 
   # Celery Worker for async tasks
+  # NOT-YET-WIRED: src/api/tasks.py does not exist in this repo. Bring up
+  # behind the `workers` profile only after the tasks module is implemented:
+  #     docker compose --profile workers up
   celery-worker:
+    profiles: ["workers"]
     build:
       context: .
       dockerfile: Dockerfile
     container_name: voiceflow-celery
     command: celery -A src.api.tasks worker --loglevel=info --concurrency=4
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/voiceflow
       - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env
@@ -119,14 +129,15 @@ services:
       retries: 3
 
   # Celery Beat for scheduled tasks
+  # NOT-YET-WIRED: needs src/api/tasks.py — see celery-worker comment above.
   celery-beat:
+    profiles: ["workers"]
     build:
       context: .
       dockerfile: Dockerfile
     container_name: voiceflow-beat
     command: celery -A src.api.tasks beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/voiceflow
       - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env
@@ -142,7 +153,11 @@ services:
       - voiceflow-network
 
   # Voice Agent — Real-time call handler (LiveKit / PIOPIY)
+  # NOT-YET-WIRED: build context `../livekit-voice-agent/` is a sibling repo
+  # that must exist on the build host. Bring up behind the `voice` profile:
+  #     docker compose --profile voice up
   voice-agent:
+    profiles: ["voice"]
     build:
       context: ../livekit-voice-agent
       dockerfile: Dockerfile
@@ -150,7 +165,6 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/voiceflow
       - VOICEFLOW_API_URL=http://api:8000
       - TRANSPORT=piopiy
     env_file:
@@ -173,16 +187,18 @@ services:
       start_period: 30s
       retries: 3
 
-  # n8n Workflow Automation
+  # n8n Workflow Automation — opt-in
+  #     docker compose --profile tools up n8n
   n8n:
+    profiles: ["tools"]
     image: n8nio/n8n:latest
     container_name: voiceflow-n8n
     ports:
       - "5678:5678"
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=voiceflow123
+      - N8N_BASIC_AUTH_USER=${N8N_USER:?N8N_USER must be set in .env}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:?N8N_PASSWORD must be set in .env}
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
@@ -196,15 +212,16 @@ services:
     networks:
       - voiceflow-network
 
-  # Flowise for AI workflows (optional)
+  # Flowise for AI workflows — opt-in
   flowise:
+    profiles: ["tools"]
     image: flowiseai/flowise:latest
     container_name: voiceflow-flowise
     ports:
       - "3001:3000"
     environment:
-      - FLOWISE_USERNAME=admin
-      - FLOWISE_PASSWORD=voiceflow123
+      - FLOWISE_USERNAME=${FLOWISE_USER:?FLOWISE_USER must be set in .env}
+      - FLOWISE_PASSWORD=${FLOWISE_PASSWORD:?FLOWISE_PASSWORD must be set in .env}
     volumes:
       - flowise_data:/root/.flowise
     depends_on:
@@ -214,8 +231,12 @@ services:
     networks:
       - voiceflow-network
 
-  # Nginx Reverse Proxy
+  # Nginx Reverse Proxy — opt-in
+  # NOT-YET-WIRED: requires `deployment/nginx.conf` to exist in the repo. On
+  # Coolify, prefer the built-in Traefik proxy (handles TLS automatically).
+  #     docker compose --profile proxy up
   nginx:
+    profiles: ["proxy"]
     image: nginx:alpine
     container_name: voiceflow-nginx
     ports:
@@ -245,6 +266,7 @@ services:
   #   Renew:       docker compose run --rm certbot renew
   #   Auto-renew:  Add cron: 0 3 */60 * * docker compose run --rm certbot renew && docker compose exec nginx nginx -s reload
   certbot:
+    profiles: ["proxy"]
     image: certbot/certbot:latest
     container_name: voiceflow-certbot
     volumes:
@@ -253,8 +275,10 @@ services:
     networks:
       - voiceflow-network
 
-  # Prometheus for metrics
+  # Prometheus for metrics — opt-in
+  #     docker compose --profile monitoring up
   prometheus:
+    profiles: ["monitoring"]
     image: prom/prometheus:latest
     container_name: voiceflow-prometheus
     ports:
@@ -269,14 +293,15 @@ services:
     networks:
       - voiceflow-network
 
-  # Grafana for dashboards
+  # Grafana for dashboards — opt-in (monitoring profile)
   grafana:
+    profiles: ["monitoring"]
     image: grafana/grafana:latest
     container_name: voiceflow-grafana
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=voiceflow123
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set in .env}
     volumes:
       - grafana_data:/var/lib/grafana
     depends_on:

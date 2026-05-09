@@ -174,8 +174,17 @@ def _strip_data_url(data_url: str) -> str:
 
 
 def _safe_filename(prefix: str) -> str:
+    """
+    Build a render filename of the form:
+        {prefix}_{YYYYMMDD_HHMMSS}_{32-hex-uuid}.png
+
+    The 32-char (128-bit) suffix is critical for security: render URLs are
+    served as effectively-public URLs through the public quote portal, so the
+    filename must be unguessable to prevent enumeration of other tenants'
+    proprietary building images.
+    """
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    suffix = uuid.uuid4().hex[:6]
+    suffix = uuid.uuid4().hex  # 32 hex chars = 128 bits of entropy
     safe_prefix = re.sub(r"[^A-Za-z0-9_-]", "_", prefix or "render")
     return f"{safe_prefix}_{stamp}_{suffix}.png"
 

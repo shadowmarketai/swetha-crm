@@ -5,6 +5,7 @@ Swetha Structures CRM - Quotation Router
 All quotations are tied to CRM leads (lead_id is mandatory).
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -412,7 +413,10 @@ async def preview_ai_render(
         )
 
     try:
-        renders = ai_render_service.generate_realistic_renders(
+        # Gemini calls are blocking I/O (3-15s); run on the thread pool so we
+        # don't starve the event loop and other async requests.
+        renders = await asyncio.to_thread(
+            ai_render_service.generate_realistic_renders,
             capture_b64=payload.capture_image,
             params=payload.building_params,
             lead={"company": payload.lead_company} if payload.lead_company else None,
@@ -486,7 +490,10 @@ async def generate_ai_render_for_quote(
         lead_ctx = {"company": quote.client_name}
 
     try:
-        renders = ai_render_service.generate_realistic_renders(
+        # Offload the blocking Gemini call to a worker thread so the async
+        # event loop stays free for other tenants' requests.
+        renders = await asyncio.to_thread(
+            ai_render_service.generate_realistic_renders,
             capture_b64=payload.capture_image,
             params=params,
             lead=lead_ctx,
