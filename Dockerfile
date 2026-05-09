@@ -76,6 +76,10 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV APP_ENV=production
+# Multi-worker safety: only ONE container in the deployment should run the
+# quotation render polling loop. API containers serve traffic; a separate
+# single-worker container should set RUN_BG_WORKER=1 and run the same image.
+ENV RUN_BG_WORKER=0
 
 # Switch to non-root user
 USER appuser
@@ -91,11 +95,14 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENTRYPOINT ["tini", "--"]
 
 # Run with uvicorn for production
+# --forwarded-allow-ips intentionally NOT set to "*" — the app's
+# ProxyHeadersMiddleware already validates X-Forwarded-* against
+# FORWARDED_ALLOW_IPS env (defaults 127.0.0.1,::1). Pass the proxy's
+# real IP/CIDR via FORWARDED_ALLOW_IPS at deploy time.
 CMD ["python", "-m", "uvicorn", "src.api.server:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "2", \
      "--proxy-headers", \
-     "--forwarded-allow-ips", "*", \
      "--access-log", \
      "--log-level", "info"]
