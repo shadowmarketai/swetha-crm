@@ -48,6 +48,25 @@ def validate_environment():
             else:
                 issues["warnings"].append(f"UNSET: {var} — {desc} (using default)")
 
+    # SECRET_KEY strength: production refuses to start with a weak key.
+    # Catches dev defaults that are technically "set" but unsafe (short
+    # length, project markers, etc.).
+    secret_key = os.environ.get("SECRET_KEY", "")
+    if secret_key:
+        weak_markers = ("voiceflow", "shadow-market", "change-in-production",
+                        "default", "dev-only", "test-only")
+        is_short = len(secret_key) < 32
+        is_weak = any(marker in secret_key.lower() for marker in weak_markers)
+        if is_short or is_weak:
+            msg = (
+                f"WEAK SECRET_KEY (len={len(secret_key)}) — must be ≥32 chars and "
+                "free of known dev markers. Rotate before exposing to traffic."
+            )
+            if app_env == "production":
+                issues["errors"].append(msg)
+            else:
+                issues["warnings"].append(msg)
+
     # Recommended
     for var, desc in RECOMMENDED_VARS.items():
         if not os.environ.get(var):
