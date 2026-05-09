@@ -150,19 +150,16 @@ class TestProtectedEndpoints:
             f"{method} {path} returned {resp.status_code}, expected 401/403"
         )
 
-    @pytest.mark.xfail(reason="Legacy SQL tables have different schema than ORM models; needs auth_service ORM migration")
     async def test_authenticated_user_can_access_campaigns(self, async_client, async_auth_headers):
         """Authenticated user should be able to list campaigns."""
         resp = await async_client.get("/api/v1/campaigns/", headers=async_auth_headers)
         assert resp.status_code == 200
 
-    @pytest.mark.xfail(reason="Legacy SQL tables have different schema than ORM models; needs auth_service ORM migration")
     async def test_authenticated_user_can_access_crm_leads(self, async_client, async_auth_headers):
         """Authenticated user should be able to list CRM leads."""
         resp = await async_client.get("/api/v1/crm-leads", headers=async_auth_headers)
         assert resp.status_code == 200
 
-    @pytest.mark.xfail(reason="Legacy SQL tables have different schema than ORM models; needs auth_service ORM migration")
     async def test_authenticated_user_can_access_dashboard(self, async_client, async_auth_headers):
         """Authenticated user should be able to access CRM dashboard."""
         resp = await async_client.get("/api/v1/dashboard", headers=async_auth_headers)

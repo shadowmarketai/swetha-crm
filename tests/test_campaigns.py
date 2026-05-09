@@ -24,12 +24,11 @@ import logging
 
 import pytest
 
-# Mixed state: 10/25 tests pass cleanly today, 15 fail on campaign-lifecycle
-# state transitions and missing fields. Leaving xfail at the module level
-# (strict=False) until the campaign state machine is reviewed; passing
-# tests will appear as 'xpassed' in the report rather than green.
-pytestmark = pytest.mark.xfail(
-    reason="Lifecycle/state-machine mismatch in test_campaigns; fix per-test in a future pass",
+# Mixed state: tests covering campaign-lifecycle state transitions still
+# fail — they are individually marked xfail below. The remaining tests
+# (auth gates, validation, list/not-found) pass and run as normal.
+_LIFECYCLE_XFAIL = pytest.mark.xfail(
+    reason="Campaign state-machine mismatch — pending per-test rewrite",
     strict=False,
 )
 
@@ -54,6 +53,7 @@ class TestCampaignCRUD:
         assert "total" in data
         assert isinstance(data["items"], list)
 
+    @_LIFECYCLE_XFAIL
     async def test_create_campaign(self, async_client, async_auth_headers):
         """POST /api/v1/campaigns/ should create a new campaign."""
         payload = {
@@ -76,6 +76,7 @@ class TestCampaignCRUD:
         assert data["status"] == "draft"
         assert data["currency"] == "INR"
 
+    @_LIFECYCLE_XFAIL
     async def test_create_campaign_minimal(self, async_client, async_auth_headers):
         """Create a campaign with only the required fields."""
         resp = await async_client.post("/api/v1/campaigns/", json={
@@ -108,6 +109,7 @@ class TestCampaignCRUD:
         }, headers=async_auth_headers)
         assert resp.status_code == 422
 
+    @_LIFECYCLE_XFAIL
     async def test_get_campaign_by_id(self, async_client, async_auth_headers):
         """Create a campaign, then GET it by ID."""
         create_resp = await async_client.post("/api/v1/campaigns/", json={
@@ -130,6 +132,7 @@ class TestCampaignCRUD:
         )
         assert resp.status_code == 404
 
+    @_LIFECYCLE_XFAIL
     async def test_update_campaign(self, async_client, async_auth_headers):
         """Create a campaign, then PUT to update it."""
         create_resp = await async_client.post("/api/v1/campaigns/", json={
@@ -159,6 +162,7 @@ class TestCampaignCRUD:
         )
         assert resp.status_code == 404
 
+    @_LIFECYCLE_XFAIL
     async def test_delete_draft_campaign(self, async_client, async_auth_headers):
         """Create a draft campaign, then DELETE it."""
         create_resp = await async_client.post("/api/v1/campaigns/", json={
@@ -174,6 +178,7 @@ class TestCampaignCRUD:
         assert del_resp.status_code == 200
         assert "message" in del_resp.json()
 
+    @_LIFECYCLE_XFAIL
     async def test_delete_active_campaign_fails(self, async_client, async_auth_headers):
         """Cannot delete an active campaign - should return 400."""
         # Create
@@ -213,6 +218,8 @@ class TestCampaignCRUD:
 @pytest.mark.asyncio
 class TestCampaignLifecycle:
     """Campaign state transitions: draft -> active -> paused -> active."""
+
+    pytestmark = _LIFECYCLE_XFAIL
 
     async def test_start_campaign(self, async_client, async_auth_headers):
         """Start a draft campaign (draft -> active)."""
@@ -370,6 +377,7 @@ class TestCampaignLifecycle:
 class TestCampaignStats:
     """Tests for /api/v1/campaigns/{id}/stats."""
 
+    @_LIFECYCLE_XFAIL
     async def test_get_campaign_stats(self, async_client, async_auth_headers):
         """GET stats for a campaign should return performance metrics."""
         create_resp = await async_client.post("/api/v1/campaigns/", json={
@@ -399,6 +407,7 @@ class TestCampaignStats:
         )
         assert resp.status_code == 404
 
+    @_LIFECYCLE_XFAIL
     async def test_stats_for_new_campaign_has_zero_metrics(self, async_client, async_auth_headers):
         """A newly created campaign should have zero performance metrics."""
         create_resp = await async_client.post("/api/v1/campaigns/", json={
