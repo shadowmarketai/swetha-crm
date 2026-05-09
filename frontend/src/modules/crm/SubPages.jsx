@@ -1519,7 +1519,7 @@ export function ActivitiesPage() {
 
   const filteredActivities = useMemo(() => {
     if (filter === 'all') return activities;
-    const typeMap = { calls: 'call', meetings: 'meeting', emails: 'email', tasks: 'task' };
+    const typeMap = { calls: 'call', meetings: 'meeting', emails: 'email', tasks: 'task', notes: 'note' };
     return activities.filter(a => a.type === (typeMap[filter] || filter));
   }, [activities, filter]);
 
@@ -1616,7 +1616,7 @@ export function ActivitiesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Activities"
-        subtitle="Calls, meetings, tasks & emails"
+        subtitle="Calls, meetings, tasks, emails & notes"
         actions={
           <>
             <Button
@@ -1657,6 +1657,7 @@ export function ActivitiesPage() {
           { value: 'meetings', label: 'Meetings' },
           { value: 'emails', label: 'Emails' },
           { value: 'tasks', label: 'Tasks' },
+          { value: 'notes', label: 'Notes' },
         ]}
       />
 

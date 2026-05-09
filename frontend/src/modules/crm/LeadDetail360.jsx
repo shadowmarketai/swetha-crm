@@ -33,8 +33,6 @@ export default function LeadDetail360() {
   const { leadId } = useParams()
   const navigate = useNavigate()
   const [lead, setLead] = useState(null)
-  const [company, setCompany] = useState(null)
-  const [contacts, setContacts] = useState([])
   const [deals, setDeals] = useState([])
   const [quotations, setQuotations] = useState([])
   const [activities, setActivities] = useState([])
@@ -51,15 +49,13 @@ export default function LeadDetail360() {
       setLead(leadData)
 
       // Fetch linked data in parallel
-      const [companyRes, dealsRes, activitiesRes, quotationsRes, ticketsRes] = await Promise.allSettled([
-        leadData.company_id ? api.get(`/api/v1/crm-companies/${leadData.company_id}`) : Promise.resolve(null),
+      const [dealsRes, activitiesRes, quotationsRes, ticketsRes] = await Promise.allSettled([
         api.get('/api/v1/crm-deals', { params: { limit: 50, lead_id: String(leadId) } }),
         api.get('/api/v1/crm-activities', { params: { limit: 50, lead_id: leadId } }),
         quotationAPI.getAll({ lead_id: leadId, page_size: 20 }).catch(() => ({ data: { items: [] } })),
         api.get('/api/v1/helpdesk/tickets', { params: { limit: 20, search: leadData.email || leadData.phone } }).catch(() => ({ data: { items: [] } })),
       ])
 
-      if (companyRes.status === 'fulfilled' && companyRes.value?.data) setCompany(companyRes.value.data)
       if (dealsRes.status === 'fulfilled') {
         const d = dealsRes.value?.data
         setDeals(Array.isArray(d) ? d : d?.items || [])
@@ -77,14 +73,6 @@ export default function LeadDetail360() {
         setTickets(Array.isArray(t) ? t : t?.items || [])
       }
 
-      // Fetch contacts at company
-      if (leadData.company_id) {
-        try {
-          const cRes = await api.get('/api/v1/crm-contacts', { params: { limit: 50, company_id: leadData.company_id } })
-          const c = cRes.data
-          setContacts(Array.isArray(c) ? c : c?.items || [])
-        } catch {}
-      }
     } catch (err) {
       toast.error('Failed to load lead details')
     } finally {
@@ -167,20 +155,6 @@ export default function LeadDetail360() {
             </div>
           </CardBody>
         </Card>
-
-        {company && (
-          <Card>
-            <CardHeader title="Company" subtitle={company.industry} />
-            <CardBody>
-              <div className="space-y-3">
-                <InfoRow icon={Building2} label="Name" value={company.name} />
-                <InfoRow icon={Phone} label="Phone" value={company.phone} />
-                <InfoRow icon={Mail} label="Website" value={company.website} />
-                <InfoRow icon={User} label="Contacts" value={`${contacts.length} people`} />
-              </div>
-            </CardBody>
-          </Card>
-        )}
 
         <Card>
           <CardHeader title="Quick Actions" />

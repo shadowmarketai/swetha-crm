@@ -59,7 +59,7 @@ export default function LeadsPage() {
 
   const fetchLeads = () => {
     setLoadingLeads(true);
-    leadsAPI.getAll({ limit: 200 }).then((res) => {
+    leadsAPI.getAll({ limit: 100 }).then((res) => {
       const data = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.leads || [];
       const mapped = data.map((l, i) => ({
         id: l.id || 1000 + i,

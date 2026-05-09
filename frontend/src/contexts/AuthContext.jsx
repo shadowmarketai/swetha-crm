@@ -84,7 +84,6 @@ export function AuthProvider({ children }) {
       role: 'admin',
       company: 'Swetha Structures Pvt Ltd',
       plan: 'professional',
-      is_super_admin: false,
       tenant_id: '',
     }
     localStorage.setItem('swetha_token', 'demo-token-123')
@@ -109,7 +108,6 @@ export function AuthProvider({ children }) {
       role: role,
       company: 'Swetha Structures Pvt Ltd',
       plan: role === 'admin' ? 'pro' : 'starter',
-      is_super_admin: false,
       tenant_id: '',
     }
     localStorage.setItem('swetha_token', 'demo-token-123')

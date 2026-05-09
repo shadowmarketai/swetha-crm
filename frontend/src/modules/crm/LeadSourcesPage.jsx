@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { integrationsAPI } from '../../services/api';
+import api from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import {
   Settings, RefreshCw, Check, ExternalLink, Copy, AlertCircle, Loader2,
@@ -253,12 +253,17 @@ export default function LeadSourcesPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await integrationsAPI.getAll();
-      const data = Array.isArray(res.data) ? res.data : res.data?.configs || [];
-      setConfigs(data);
-      // If the API returns stats alongside configs, use them
-      if (res.data?.stats) {
-        setStats(Array.isArray(res.data.stats) ? res.data.stats : []);
+      const [configsRes, statsRes] = await Promise.allSettled([
+        api.get('/api/v1/lead-sources/configs'),
+        api.get('/api/v1/lead-sources/stats'),
+      ]);
+      if (configsRes.status === 'fulfilled') {
+        const data = Array.isArray(configsRes.value.data) ? configsRes.value.data : [];
+        setConfigs(data);
+      }
+      if (statsRes.status === 'fulfilled') {
+        const data = Array.isArray(statsRes.value.data) ? statsRes.value.data : [];
+        setStats(data);
       }
     } catch {
       toast.error('Failed to load lead source configurations');
@@ -272,7 +277,13 @@ export default function LeadSourcesPage() {
   const handleSave = async (payload) => {
     setIsSaving(true);
     try {
-      await integrationsAPI.connect(payload.provider, payload);
+      // Check if config already exists for this provider
+      const existing = configs.find((c) => c.provider === payload.provider);
+      if (existing) {
+        await api.put(`/api/v1/lead-sources/configs/${existing.id}`, payload);
+      } else {
+        await api.post('/api/v1/lead-sources/configs', payload);
+      }
       toast.success(`${payload.provider} configuration saved!`);
       fetchData();
     } catch {
@@ -285,11 +296,12 @@ export default function LeadSourcesPage() {
   const handleSync = async () => {
     setIsSyncing(true);
     try {
-      const result = await integrationsAPI.sync('indiamart');
-      toast.success(`Sync complete: ${result.data?.ingested || 0} new leads`);
+      const result = await api.post('/api/v1/lead-sources/indiamart/poll');
+      const ingested = result.data?.ingested || result.data?.new_leads || 0;
+      toast.success(`Sync complete: ${ingested} new leads`);
       fetchData();
     } catch {
-      toast.error('Sync failed');
+      toast.error('Sync failed — check your IndiaMart API key');
     } finally {
       setIsSyncing(false);
     }

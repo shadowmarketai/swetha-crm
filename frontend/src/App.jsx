@@ -23,14 +23,10 @@ const features = defaultFeatures
 const CRMDashboard = lazy(() => import('./modules/crm/Dashboard'))
 const LeadsPage = lazy(() => import('./modules/crm/LeadsPage'))
 const LeadDetail360 = lazy(() => import('./modules/crm/LeadDetail360'))
-const CompaniesPage = lazy(() => import('./modules/crm/SubPages').then(m => ({ default: m.CompaniesPage })))
-const ContactsPage = lazy(() => import('./modules/crm/SubPages').then(m => ({ default: m.ContactsPage })))
 const DealsPage = lazy(() => import('./modules/crm/SubPages').then(m => ({ default: m.DealsPage })))
 const ActivitiesPage = lazy(() => import('./modules/crm/SubPages').then(m => ({ default: m.ActivitiesPage })))
 const TasksPage = lazy(() => import('./modules/crm/CRMSubPages2').then(m => ({ default: m.TasksPage })))
-const NotesPage = lazy(() => import('./modules/crm/CRMSubPages2').then(m => ({ default: m.NotesPage })))
 const CRMSettingsPage = lazy(() => import('./modules/crm/CRMSettings').then(m => ({ default: m.CRMSettingsPage })))
-const CRMIntegrationsPage = lazy(() => import('./modules/crm/CRMSettings').then(m => ({ default: m.CRMIntegrationsPage })))
 const LeadSourcesPage = lazy(() => import('./modules/crm/LeadSourcesPage'))
 
 // Voice AI Integration (monitoring dashboard for external platform)
@@ -41,20 +37,17 @@ const VoiceCampaigns = lazy(() => import('./modules/voice-ai/Campaigns'))
 const VoiceCallLogs = lazy(() => import('./modules/voice-ai/CallLogs'))
 const VoiceAnalytics = lazy(() => import('./modules/voice-ai/Analytics'))
 
-// ── Quotation Module (PEB) ──
+// ── Quotation Module ──
 const QuotationDashboard = lazy(() => import('./modules/quotation/QuotationDashboard'))
-const AIQuote = lazy(() => import('./modules/quotation/AIQuote'))
 const NewQuotation = lazy(() => import('./modules/quotation/NewQuotation'))
 const QuotationHistory = lazy(() => import('./modules/quotation/QuotationHistory'))
-const AuditLogs = lazy(() => import('./modules/quotation/AuditLogs'))
 const Viewer3D = lazy(() => import('./modules/quotation/Viewer3D'))
 const Drawings2D = lazy(() => import('./modules/quotation/Drawings2D'))
 const AIImage = lazy(() => import('./modules/quotation/AIImage'))
-const MaterialCost = lazy(() => import('./modules/quotation/MaterialCost'))
 const TemplateStudio = lazy(() => import('./modules/quotation/TemplateStudio'))
 const TemplateEditor = lazy(() => import('./modules/quotation/TemplateEditor'))
-const ReviewInbox = lazy(() => import('./modules/quotation/ReviewInbox'))
 const QuotationDetail = lazy(() => import('./modules/quotation/QuotationDetail'))
+const PricingConfig = lazy(() => import('./modules/quotation/PricingConfig'))
 // Public (no-auth) pages
 const PublicIntakePage = lazy(() => import('./modules/quotation/public/PublicIntakePage'))
 const PublicQuotePortal = lazy(() => import('./modules/quotation/public/PublicQuotePortal'))
@@ -154,14 +147,10 @@ function App() {
               <Route path="crm" element={<RoleGatedRoute module="crm"><S><CRMDashboard /></S></RoleGatedRoute>} />
               <Route path="crm/leads" element={<RoleGatedRoute module="crm"><S><LeadsPage /></S></RoleGatedRoute>} />
               <Route path="crm/leads/:leadId" element={<RoleGatedRoute module="crm"><S><LeadDetail360 /></S></RoleGatedRoute>} />
-              <Route path="crm/companies" element={<RoleGatedRoute module="crm"><S><CompaniesPage /></S></RoleGatedRoute>} />
-              <Route path="crm/contacts" element={<RoleGatedRoute module="crm"><S><ContactsPage /></S></RoleGatedRoute>} />
               <Route path="crm/deals" element={<RoleGatedRoute module="crm"><S><DealsPage /></S></RoleGatedRoute>} />
               <Route path="crm/activities" element={<RoleGatedRoute module="crm"><S><ActivitiesPage /></S></RoleGatedRoute>} />
               <Route path="crm/tasks" element={<RoleGatedRoute module="crm"><S><TasksPage /></S></RoleGatedRoute>} />
-              <Route path="crm/notes" element={<RoleGatedRoute module="crm"><S><NotesPage /></S></RoleGatedRoute>} />
               <Route path="crm/settings" element={<RoleGatedRoute module="crm"><S><CRMSettingsPage /></S></RoleGatedRoute>} />
-              <Route path="crm/integrations" element={<RoleGatedRoute module="crm"><S><CRMIntegrationsPage /></S></RoleGatedRoute>} />
               <Route path="crm/lead-sources" element={<RoleGatedRoute module="crm"><S><LeadSourcesPage /></S></RoleGatedRoute>} />
             </>
           )}
@@ -178,21 +167,20 @@ function App() {
             </>
           )}
 
-          {/* Quotation Module (PEB) */}
+          {/* Quotation Module */}
           {isModuleEnabled(features, 'quotation') && (
             <>
               <Route path="quotation" element={<RoleGatedRoute module="quotation"><S><QuotationDashboard /></S></RoleGatedRoute>} />
-              <Route path="quotation/ai" element={<RoleGatedRoute module="quotation"><S><AIQuote /></S></RoleGatedRoute>} />
               <Route path="quotation/new" element={<RoleGatedRoute module="quotation"><S><NewQuotation /></S></RoleGatedRoute>} />
-              <Route path="quotation/3d" element={<RoleGatedRoute module="quotation"><S><Viewer3D /></S></RoleGatedRoute>} />
-              <Route path="quotation/drawings" element={<RoleGatedRoute module="quotation"><S><Drawings2D /></S></RoleGatedRoute>} />
-              <Route path="quotation/ai-image" element={<RoleGatedRoute module="quotation"><S><AIImage /></S></RoleGatedRoute>} />
-              <Route path="quotation/history" element={<RoleGatedRoute module="quotation"><S><QuotationHistory /></S></RoleGatedRoute>} />
-              <Route path="quotation/logs" element={<RoleGatedRoute module="quotation"><S><AuditLogs /></S></RoleGatedRoute>} />
-              <Route path="quotation/material-cost" element={<RoleGatedRoute module="quotation"><S><MaterialCost /></S></RoleGatedRoute>} />
               <Route path="quotation/templates" element={<RoleGatedRoute module="quotation"><S><TemplateStudio /></S></RoleGatedRoute>} />
               <Route path="quotation/templates/:templateId" element={<RoleGatedRoute module="quotation"><S><TemplateEditor /></S></RoleGatedRoute>} />
-              <Route path="quotation/inbox" element={<RoleGatedRoute module="quotation"><S><ReviewInbox /></S></RoleGatedRoute>} />
+              <Route path="quotation/3d" element={<RoleGatedRoute module="quotation"><S><Viewer3D /></S></RoleGatedRoute>} />
+              <Route path="quotation/:quotationId/3d" element={<RoleGatedRoute module="quotation"><S><Viewer3D /></S></RoleGatedRoute>} />
+              <Route path="quotation/drawings" element={<RoleGatedRoute module="quotation"><S><Drawings2D /></S></RoleGatedRoute>} />
+              <Route path="quotation/:quotationId/drawings" element={<RoleGatedRoute module="quotation"><S><Drawings2D /></S></RoleGatedRoute>} />
+              <Route path="quotation/ai-image" element={<RoleGatedRoute module="quotation"><S><AIImage /></S></RoleGatedRoute>} />
+              <Route path="quotation/pricing" element={<RoleGatedRoute module="quotation"><S><PricingConfig /></S></RoleGatedRoute>} />
+              <Route path="quotation/history" element={<RoleGatedRoute module="quotation"><S><QuotationHistory /></S></RoleGatedRoute>} />
               <Route path="quotation/:quotationId" element={<RoleGatedRoute module="quotation"><S><QuotationDetail /></S></RoleGatedRoute>} />
             </>
           )}

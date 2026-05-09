@@ -23,31 +23,3 @@ export default function ProtectedRoute({ children }) {
   if (!user) return <Navigate to="/login" replace />
   return children
 }
-
-/**
- * SuperAdminRoute — gate for the platform console (/admin/*).
- * - Logged out → /login
- * - Tenant user (not super admin) → bounce to / (their tenant dashboard)
- * - Super admin → render
- */
-export function SuperAdminRoute({ children }) {
-  const { user, loading } = useAuth()
-  if (loading) return <LoadingScreen />
-  if (!user) return <Navigate to="/login" replace />
-  if (!user.is_super_admin) return <Navigate to="/" replace />
-  return children
-}
-
-/**
- * TenantRoute — gate for tenant CRM pages (/, /crm, /voice, /quotation, …).
- * - Logged out → /login
- * - Super admin → bounce to /admin (they have no tenant; should never see CRM UI)
- * - Tenant user → render
- */
-export function TenantRoute({ children }) {
-  const { user, loading } = useAuth()
-  if (loading) return <LoadingScreen />
-  if (!user) return <Navigate to="/login" replace />
-  if (user.is_super_admin) return <Navigate to="/admin" replace />
-  return children
-}
