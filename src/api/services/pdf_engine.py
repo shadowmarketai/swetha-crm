@@ -1,45 +1,35 @@
 """
-PDF Quotation Generator — Premium tenant-branded multi-page PDF
-================================================================
-Generates professional PEB quotation PDFs using reportlab.
+PDF Quotation Generator — Swetha Structures Proposal Format
+=============================================================
+Generates professional 11+ page PEB quotation PDFs matching the exact
+Swetha Structures proposal format (cover letter, scope, design standards,
+building desc, material specs, work desc, price & payment, exclusions,
+delivery, T&C, summary, abstract BOQ, plan).
 
-Backward compatible:
-    generate_quotation_pdf(data: dict, boq: dict) -> bytes      (legacy)
-    generate_quotation_pdf(quotation, lead=None, *,
-                            tenant_branding=None,
-                            portal_url=None,
-                            render_3d_path=None) -> bytes       (new premium)
+Uses reportlab for PDF generation.
 """
 
 import io
+import math
 import os
-from datetime import datetime
-from urllib.parse import urlparse
+from datetime import datetime, timedelta
 
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
-        PageBreak, Image, KeepTogether,
+        PageBreak, KeepTogether,
     )
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
-try:
-    import qrcode  # noqa: F401
-    QR_AVAILABLE = True
-except ImportError:
-    QR_AVAILABLE = False
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _fmt_inr(value) -> str:
     try:
@@ -55,20 +45,14 @@ def _fmt_qty(value) -> str:
         return str(value)
 
 
-def _hex(color_str, default="#1e293b"):
-    """Safely parse a hex color string."""
+def _fmt_inr_round(value) -> str:
     try:
-        if not color_str:
-            return colors.HexColor(default)
-        if not color_str.startswith("#"):
-            color_str = "#" + color_str
-        return colors.HexColor(color_str)
+        return f"Rs.{float(value):,.0f}"
     except Exception:
-        return colors.HexColor(default)
+        return str(value)
 
 
 def _get_attr(obj, key, default=None):
-    """Get attribute from object or key from dict."""
     if obj is None:
         return default
     if isinstance(obj, dict):
@@ -76,820 +60,997 @@ def _get_attr(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _resolve_image_path(path):
-    """Return a local path or URL ready for reportlab Image; or None."""
-    if not path:
-        return None
-    try:
-        parsed = urlparse(str(path))
-        if parsed.scheme in ("http", "https"):
-            # reportlab can fetch http(s) via Image when PIL is present.
-            return str(path)
-        if os.path.exists(str(path)):
-            return str(path)
-    except Exception:
-        return None
-    return None
+def _sheet_label(sheet_type: str) -> str:
+    """Convert sheet type value to human label."""
+    if not sheet_type:
+        return "Bare Galvalume 0.47mm"
+    return sheet_type.replace("_", " ").replace("bare galvalume", "Bare Galvalume").replace(
+        "bare colour galvalume", "Colour Galvalume").replace(
+        "puf panel", "PUF Panel").replace("mm", "mm").title()
 
 
-def _generate_qr_bytes(url: str):
-    """Generate a QR PNG and return BytesIO, or None if unavailable."""
-    if not QR_AVAILABLE or not url:
-        return None
-    try:
-        import qrcode
-        qr = qrcode.QRCode(box_size=4, border=2)
-        qr.add_data(url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        bio = io.BytesIO()
-        img.save(bio, format="PNG")
-        bio.seek(0)
-        return bio
-    except Exception:
-        return None
+def _roof_type_label(rt: str) -> str:
+    if rt == "a_type":
+        return "A Type"
+    if rt == "monoslope":
+        return "Monoslope"
+    return rt.replace("_", " ").title()
 
 
-# ---------------------------------------------------------------------------
-# Legacy renderer (kept for backward compatibility with existing dict callers)
-# ---------------------------------------------------------------------------
+# ─── Company Info ─────────────────────────────────────────────────────────────
 
-def _render_legacy(data: dict, boq: dict) -> bytes:
-    """Original Swetha Structures branded single-page-ish renderer."""
-    if not REPORTLAB_AVAILABLE:
-        raise RuntimeError("reportlab not installed. Run: pip install reportlab")
+COMPANY = {
+    "name": "SWETHA STRUCTURES PVT LTD",
+    "tagline": "Engineers & Contractors",
+    "address": "44, Alagu Nagar, Kalapatti Main Road, Saravanampatti, Coimbatore-641035. Tamilnadu",
+    "phone": "+91 9597760251 / 9444053074",
+    "landline": "0422-3239629",
+    "email": "swethastructures@gmail.com",
+    "website": "www.swethastructures.com",
+    "md_name": "K.Selvam, M.E (Struct), M.I.E, F.I.V",
+    "md_title": "Managing Director",
+}
 
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        rightMargin=15 * mm, leftMargin=15 * mm,
-        topMargin=15 * mm, bottomMargin=15 * mm,
-    )
 
-    dark_blue = colors.HexColor("#1e3a5f")
+# ─── Styles ───────────────────────────────────────────────────────────────────
+
+def _build_styles():
+    dark = colors.HexColor("#1e293b")
     accent = colors.HexColor("#D97706")
-    light_bg = colors.HexColor("#fffbeb")
-    light_row = colors.HexColor("#fefce8")
+    return {
+        "COMPANY_NAME": ParagraphStyle("cn", fontSize=14, fontName="Helvetica-Bold",
+                                        textColor=dark, alignment=TA_CENTER, leading=18),
+        "COMPANY_TAG": ParagraphStyle("ct", fontSize=9, fontName="Helvetica",
+                                       textColor=colors.grey, alignment=TA_CENTER),
+        "COMPANY_ADDR": ParagraphStyle("ca", fontSize=7, fontName="Helvetica",
+                                        textColor=colors.grey, alignment=TA_CENTER, leading=10),
+        "PAGE_NUM": ParagraphStyle("pn", fontSize=8, fontName="Helvetica",
+                                    textColor=colors.grey, alignment=TA_CENTER),
+        "H_SECTION": ParagraphStyle("hs", fontSize=12, fontName="Helvetica-Bold",
+                                     textColor=dark, spaceAfter=6, spaceBefore=8),
+        "BODY": ParagraphStyle("body", fontSize=10, fontName="Helvetica",
+                                textColor=dark, leading=14, alignment=TA_JUSTIFY),
+        "BODY_BOLD": ParagraphStyle("bb", fontSize=10, fontName="Helvetica-Bold",
+                                     textColor=dark, leading=14),
+        "SMALL": ParagraphStyle("sm", fontSize=8, fontName="Helvetica",
+                                 textColor=dark, leading=11),
+        "SMALL_BOLD": ParagraphStyle("sb", fontSize=8, fontName="Helvetica-Bold",
+                                      textColor=dark, leading=11),
+        "TABLE_HEADER": ParagraphStyle("th", fontSize=8, fontName="Helvetica-Bold",
+                                        textColor=colors.white, leading=11),
+        "TABLE_HEADER_R": ParagraphStyle("thr", fontSize=8, fontName="Helvetica-Bold",
+                                          textColor=colors.white, leading=11, alignment=TA_RIGHT),
+        "CELL": ParagraphStyle("cell", fontSize=8, fontName="Helvetica",
+                                textColor=dark, leading=11),
+        "CELL_R": ParagraphStyle("cellr", fontSize=8, fontName="Helvetica",
+                                  textColor=dark, leading=11, alignment=TA_RIGHT),
+        "CELL_RB": ParagraphStyle("cellrb", fontSize=8, fontName="Helvetica-Bold",
+                                   textColor=dark, leading=11, alignment=TA_RIGHT),
+        "BULLET": ParagraphStyle("bullet", fontSize=10, fontName="Helvetica",
+                                  textColor=dark, leading=14, leftIndent=15,
+                                  bulletIndent=0, spaceBefore=2, spaceAfter=2),
+        "FOOTER": ParagraphStyle("footer", fontSize=7, textColor=colors.grey,
+                                  alignment=TA_CENTER, fontName="Helvetica-Oblique"),
+        "dark": dark,
+        "accent": accent,
+        "light_bg": colors.HexColor("#f8f9fa"),
+        "border": colors.HexColor("#dee2e6"),
+    }
 
-    H1 = ParagraphStyle("h1", fontSize=16, textColor=colors.white, alignment=TA_CENTER,
-                         fontName="Helvetica-Bold", spaceAfter=4)
-    H2 = ParagraphStyle("h2", fontSize=11, textColor=dark_blue, fontName="Helvetica-Bold",
-                         spaceAfter=3)
-    SMALL = ParagraphStyle("small", fontSize=7.5, fontName="Helvetica", leading=10)
-    SMALL_BOLD = ParagraphStyle("sb", fontSize=8, fontName="Helvetica-Bold", leading=10)
-    FOOTER = ParagraphStyle("footer", fontSize=7, textColor=colors.grey,
-                             alignment=TA_CENTER, fontName="Helvetica-Oblique")
 
-    story = []
+# ─── Page Header/Footer ──────────────────────────────────────────────────────
 
-    header_table = Table(
-        [[
-            Paragraph("SWETHA STRUCTURES PVT LTD", H1),
-            Paragraph("www.swethastructures.com", ParagraphStyle(
-                "web", fontSize=9, alignment=TA_RIGHT, textColor=colors.white,
-                fontName="Helvetica"))
-        ]],
-        colWidths=["70%", "30%"]
-    )
-    header_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), accent),
-        ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
-        ("TOPPADDING", (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    story.append(header_table)
+def _make_header_footer(styles, pr_no, page_count_holder):
+    """Return onFirstPage and onLaterPages callables."""
+    dark = styles["dark"]
+    accent = styles["accent"]
+
+    def _draw(canvas, doc):
+        canvas.saveState()
+        w, h = A4
+
+        # Header
+        canvas.setFont("Helvetica-Bold", 12)
+        canvas.setFillColor(dark)
+        canvas.drawCentredString(w / 2, h - 12 * mm, COMPANY["name"])
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawCentredString(w / 2, h - 17 * mm, COMPANY["tagline"])
+        canvas.setFont("Helvetica", 6.5)
+        canvas.drawCentredString(w / 2, h - 22 * mm,
+            f"{COMPANY['address']}")
+        canvas.drawCentredString(w / 2, h - 26 * mm,
+            f"Mob: {COMPANY['phone']}, Ph: {COMPANY['landline']}, Email: {COMPANY['email']}")
+        canvas.drawCentredString(w / 2, h - 30 * mm, COMPANY["website"])
+
+        # Line under header
+        canvas.setStrokeColor(accent)
+        canvas.setLineWidth(1)
+        canvas.line(15 * mm, h - 32 * mm, w - 15 * mm, h - 32 * mm)
+
+        # Page number bottom right
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawRightString(w - 15 * mm, 10 * mm, f"{doc.page}")
+
+        canvas.restoreState()
+
+    return _draw, _draw
+
+
+# ─── Section Builders ─────────────────────────────────────────────────────────
+
+def _cover_letter(story, styles, data, pr_no, quote_date):
+    """Page 1: Cover letter."""
+    s = styles
+    story.append(Spacer(1, 10 * mm))
+
+    # PR No and Date
+    story.append(Paragraph(f"<b>PR.NO:</b> {pr_no}", s["BODY"]))
+    story.append(Paragraph(f"<b>Date:</b> {quote_date}", s["BODY"]))
+    story.append(Spacer(1, 8 * mm))
+
+    # To
+    client_name = data.get("client_name", "")
+    client_location = data.get("client_location", "")
+    story.append(Paragraph("To,", s["BODY"]))
+    story.append(Paragraph(f"<b>{client_name or 'Dear Sir/Madam'}</b>", s["BODY"]))
+    if client_location:
+        story.append(Paragraph(client_location, s["BODY"]))
     story.append(Spacer(1, 6 * mm))
 
-    quote_date = datetime.now().strftime("%d %b %Y")
+    # Subject
     project_name = data.get("project_name", "Proposed Industrial Building")
-    L = data.get("building_length", 0)
-    W = data.get("building_width", 0)
-    H = data.get("full_height", 0)
-    wh = data.get("wall_height", 0)
-    roof_type = data.get("roof_type", "gable").replace("_", " ").title()
-    roof_sheet = "PUF Panel 30mm" if data.get("roof_sheet_type") == "puf" else "Bare Galvalume"
-    wall_sheet = "PUF Panel 30mm" if data.get("side_cladding_type") == "puf" else "Bare Galvalume"
-    has_mezz = data.get("mezzanine_required", False)
-    size_str = f"{L:.0f}'x{W:.0f}' HT {H:.0f}'"
-    if has_mezz:
-        size_str += f" MEZZ {data.get('mezz_length', 0):.0f}'x{data.get('mezz_width', 0):.0f}'"
-
     story.append(Paragraph(
-        f"ABSTRACT ESTIMATE FOR PEB WORKS - INDUSTRIAL BUILDING ({size_str})", H2
+        f"<b>Sub:</b> Submission of our proposal for supply and Erection of "
+        f"PRE ENGINEERED BUILDING at {client_location or 'site'} — Reg",
+        s["BODY"]
     ))
-    story.append(Spacer(1, 3 * mm))
-
-    info_data = [
-        [Paragraph("<b>Project Name:</b>", SMALL_BOLD), Paragraph(project_name, SMALL),
-         Paragraph("<b>Date:</b>", SMALL_BOLD), Paragraph(quote_date, SMALL)],
-        [Paragraph("<b>Client:</b>", SMALL_BOLD), Paragraph(data.get("client_name", "—"), SMALL),
-         Paragraph("<b>Location:</b>", SMALL_BOLD), Paragraph(data.get("client_location", "—"), SMALL)],
-        [Paragraph("<b>Building Size:</b>", SMALL_BOLD), Paragraph(f"L={L}' x W={W}'", SMALL),
-         Paragraph("<b>Height:</b>", SMALL_BOLD), Paragraph(f"Full={H}' | Wall={wh}'", SMALL)],
-        [Paragraph("<b>Roof Type:</b>", SMALL_BOLD), Paragraph(roof_type, SMALL),
-         Paragraph("<b>Roofing:</b>", SMALL_BOLD), Paragraph(roof_sheet, SMALL)],
-        [Paragraph("<b>Side Cladding:</b>", SMALL_BOLD), Paragraph(wall_sheet, SMALL),
-         Paragraph("<b>Mezzanine:</b>", SMALL_BOLD), Paragraph("Yes" if has_mezz else "No", SMALL)],
-    ]
-    info_table = Table(info_data, colWidths=["18%", "32%", "18%", "32%"])
-    info_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), light_bg),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d4a574")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5c9a0")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(info_table)
     story.append(Spacer(1, 6 * mm))
 
-    story.append(Paragraph("BILL OF QUANTITIES", H2))
-    story.append(Spacer(1, 2 * mm))
+    # Body
+    story.append(Paragraph(
+        "Warm Greetings. We wish to thank you for providing us an opportunity to be "
+        "associated with you through the above project. We are sure that our relationship "
+        "will strengthen and grow in future.",
+        s["BODY"]
+    ))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(
+        "Herewith we submit the Scope of work, Technical Specifications, Given drawings "
+        "for Proposed Building along with our proposal for your review and acceptance.",
+        s["BODY"]
+    ))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(
+        "We assure that our services would be highly satisfactory.",
+        s["BODY"]
+    ))
+    story.append(Spacer(1, 8 * mm))
+    story.append(Paragraph("Thanking you,", s["BODY"]))
+    story.append(Paragraph("Yours Truly,", s["BODY"]))
+    story.append(Spacer(1, 12 * mm))
+    story.append(Paragraph(f"For {COMPANY['name']}", s["BODY_BOLD"]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(COMPANY["md_name"], s["BODY_BOLD"]))
+    story.append(Paragraph(COMPANY["md_title"], s["BODY"]))
+    story.append(PageBreak())
 
-    col_w = ["8%", "42%", "8%", "12%", "12%", "18%"]
-    col_widths_pt = [float(c.strip("%")) / 100 * (A4[0] - 30 * mm) for c in col_w]
 
-    boq_header = [
-        Paragraph("<b>Item No</b>", SMALL_BOLD),
-        Paragraph("<b>Description of Work</b>", SMALL_BOLD),
-        Paragraph("<b>Unit</b>", SMALL_BOLD),
-        Paragraph("<b>Quantity</b>", SMALL_BOLD),
-        Paragraph("<b>Rate (Rs.)</b>", SMALL_BOLD),
-        Paragraph("<b>Amount (Rs.)</b>", SMALL_BOLD),
+def _contents_page(story, styles):
+    """Page 2: Table of contents."""
+    s = styles
+    story.append(Spacer(1, 10 * mm))
+    story.append(Paragraph("PROPOSAL - CONTENTS", s["H_SECTION"]))
+    story.append(Spacer(1, 8 * mm))
+
+    sections = [
+        "Section-1  Scope of work",
+        "Section 2  Design Standards",
+        "Section 3  Building Description",
+        "Section 4  Basic Material Specifications",
+        "Section 5  Work Description",
+        "Section 6  Price & Payment terms",
+        "Section 7  Exclusions / Client scope",
+        "Section 8  Delivery period",
+        "Section 9  General Terms & Conditions",
+        "Section 10  Drawings",
+    ]
+    for sec in sections:
+        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;{sec}", s["BODY"]))
+        story.append(Spacer(1, 2 * mm))
+
+    story.append(PageBreak())
+
+
+def _scope_and_standards(story, styles):
+    """Page 3: Scope of work + Design Standards."""
+    s = styles
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Section-1 Scope of work", s["H_SECTION"]))
+    story.append(Paragraph(
+        "Swetha Structures Pvt Ltd proposes to construct the Building as per attached drawing "
+        "and specifications. Proposal inclusive of necessary materials, Labours &amp; Machinery "
+        "for constructions.",
+        s["BODY"]
+    ))
+    story.append(Spacer(1, 8 * mm))
+
+    story.append(Paragraph("Section-2 Design Standards", s["H_SECTION"]))
+    story.append(Paragraph(
+        "The following codes and standards will be followed for design and constructions.",
+        s["BODY"]
+    ))
+    story.append(Spacer(1, 4 * mm))
+
+    codes = [
+        ("IS 875 Part I", "Dead Loads – Unit weights of building Materials and stored materials."),
+        ("IS 875 Part II", "Imposed loads."),
+        ("IS 875 Part III", "Wind Loads."),
+        ("IS 875 Part V", "Special Loads and Combinations."),
+        ("IS 456 : 2000", "Plain and Reinforced Concrete Code of Practice."),
+        ("SP – 16", "Design aids for reinforced concrete to IS 456."),
+        ("SP – 34 – 1987", "Hand book on concrete reinforcement and detailing."),
+        ("IS 800 : 1984", "Code of practice for general construction in Steel."),
+        ("IS 819-1979, IS 816-1969", "Code of practice for welding."),
+        ("AISC Manual", "American Institute of Steel Construction."),
+        ("MBMA Manual", "Metal Building Manufacturer Association of the USA."),
     ]
 
-    items = boq.get("items", []) if boq else []
-    rows = [boq_header]
-    prev_cat = ""
-    for item in items:
-        cat = item.get("category", "")
-        if cat != prev_cat:
-            rows.append([
-                Paragraph("", SMALL_BOLD),
-                Paragraph(f"<b>{cat}</b>", SMALL_BOLD),
-                "", "", "", ""
-            ])
-            prev_cat = cat
-
-        desc_text = item.get("description", "")
-        if item.get("sub_note"):
-            desc_text += f"\n<i>({item['sub_note']})</i>"
-
-        R_STYLE = ParagraphStyle("r", fontSize=7.5, alignment=TA_RIGHT, fontName="Helvetica")
-        R_BOLD = ParagraphStyle("rb", fontSize=7.5, alignment=TA_RIGHT, fontName="Helvetica-Bold")
-
-        rows.append([
-            Paragraph(str(item.get("item_no", "")), SMALL),
-            Paragraph(desc_text.replace("\n", "<br/>"), SMALL),
-            Paragraph(str(item.get("unit", "")), SMALL),
-            Paragraph(_fmt_qty(item.get("quantity", 0)), R_STYLE),
-            Paragraph(_fmt_qty(item.get("rate", 0)), R_STYLE),
-            Paragraph(_fmt_qty(item.get("amount", 0)), R_BOLD),
+    code_data = [[Paragraph("<b>CODE</b>", s["SMALL_BOLD"]),
+                   Paragraph("<b>DESCRIPTION</b>", s["SMALL_BOLD"])]]
+    for code, desc in codes:
+        code_data.append([
+            Paragraph(code, s["SMALL"]),
+            Paragraph(desc, s["SMALL"]),
         ])
 
-    rows.append([
-        Paragraph("", SMALL),
-        Paragraph("<b>TOTAL ESTIMATED AMOUNT (Rs.)</b>", SMALL_BOLD),
-        "", "", "",
-        Paragraph(f"<b>{_fmt_qty(boq.get('total_amount', 0))}</b>",
-                  ParagraphStyle("tot", fontSize=8, alignment=TA_RIGHT, fontName="Helvetica-Bold")),
-    ])
-
-    boq_table = Table(rows, colWidths=col_widths_pt, repeatRows=1)
-    ts = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), accent),
+    code_table = Table(code_data, colWidths=["35%", "65%"])
+    code_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), s["accent"]),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("TOPPADDING", (0, 0), (-1, 0), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-        ("TOPPADDING", (0, 1), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BOX", (0, 0), (-1, -1), 0.75, accent),
-        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5c9a0")),
-        ("BACKGROUND", (0, -1), (-1, -1), light_bg),
-        ("LINEABOVE", (0, -1), (-1, -1), 1, accent),
-    ])
-
-    for i in range(1, len(rows)):
-        if i % 2 == 0:
-            ts.add("BACKGROUND", (0, i), (-1, i), light_row)
-
-    boq_table.setStyle(ts)
-    story.append(boq_table)
-    story.append(Spacer(1, 6 * mm))
-
-    # ── SUMMARY section ──
-    story.append(Paragraph("SUMMARY", H2))
-    story.append(Spacer(1, 2 * mm))
-
-    steel_summary = boq.get("steel_summary", {})
-    cladding_summary = boq.get("cladding_summary", {})
-    floor_area = boq.get("floor_area", data.get("building_length", 0) * data.get("building_width", 0))
-    steel_ton = steel_summary.get("total_steel_ton", 0)
-    roof_area = cladding_summary.get("roof_area_sqft", 0)
-    wall_area = cladding_summary.get("wall_area_sqft", 0)
-    rate_sqft = boq.get("rate_per_sqft", 0)
-    total_amt = boq.get("total_amount", 0)
-
-    summary_data = [
-        [Paragraph("<b>Area of Building (Sqft)</b>", SMALL_BOLD),
-         Paragraph(_fmt_qty(floor_area), SMALL),
-         Paragraph("<b>Steel Tonnage (MT)</b>", SMALL_BOLD),
-         Paragraph(f"{steel_ton} MT", SMALL)],
-        [Paragraph("<b>Rate / Sqft (Rs.)</b>", SMALL_BOLD),
-         Paragraph(_fmt_qty(rate_sqft), SMALL),
-         Paragraph("<b>Roof Area (Sqft)</b>", SMALL_BOLD),
-         Paragraph(_fmt_qty(roof_area), SMALL)],
-        [Paragraph("<b>Total Amount (Rs.)</b>", SMALL_BOLD),
-         Paragraph(f"Rs. {total_amt:,.2f}", SMALL),
-         Paragraph("<b>Wall Cladding (Sqft)</b>", SMALL_BOLD),
-         Paragraph(_fmt_qty(wall_area), SMALL)],
-    ]
-    summary_table = Table(summary_data, colWidths=["25%", "25%", "25%", "25%"])
-    summary_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), light_bg),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d4a574")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5c9a0")),
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(code_table)
+    story.append(PageBreak())
+
+
+def _building_description(story, styles, data):
+    """Page 4: Building Description + Material Specs."""
+    s = styles
+    params = data.get("building_params", data)
+
+    L = params.get("building_length", 0)
+    W = params.get("building_width", 0)
+    H = params.get("full_height", 0)
+    Hw = params.get("wall_height", 0)
+    Hclad = H - Hw
+    area = L * W
+    roof_type = _roof_type_label(params.get("roof_type", "a_type"))
+    roof_sheet = _sheet_label(params.get("roof_sheet_type", ""))
+    side_cladding = _sheet_label(params.get("side_cladding_type", ""))
+    has_mezz = params.get("mezzanine_required", False)
+    mezz_area = 0
+    if has_mezz:
+        mezz_area = (params.get("mezz_length", 0) or 0) * (params.get("mezz_width", 0) or 0)
+
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Section-3 Building Description", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    area_str = f"{area:,.0f} Sqft"
+    if has_mezz and mezz_area > 0:
+        area_str += f", Mezzanine Area – {mezz_area:,.0f} Sqft"
+
+    desc_data = [
+        ["Sl.No", "Description", ""],
+        ["1", "Length of building (O/O)", f"{L:.0f}'"],
+        ["2", "Width of building (O/O)", f"{W:.0f}'"],
+        ["3", "Area of the building", area_str],
+        ["4", "Roof Shape", roof_type],
+        ["5", "Eave Height", f"{H:.0f}'"],
+        ["6", "Wall Height", f"{Hw:.0f}'"],
+        ["7", "Cladding Height", f"{Hclad:.0f}'"],
+        ["8", "Roof Slope", "1 in 10"],
+        ["9", "Column", f"Steel column from Finished floor level (FFL)"],
+        ["10", "Purlin/Grit sections", "120 GSM Galvanized Cold formed section"],
+        ["11", "Frame type", "Rigid"],
+        ["12", "Sheeting profile & Area", "Trapezoidal profile & Area as per drawing"],
+        ["13", "Ridge type", "Profile Ridge"],
+        ["14", "Structural painting", "One Coat - Yellow primer & two Coats - Enamel paint"],
+    ]
+
+    desc_rows = []
+    for row in desc_data:
+        desc_rows.append([
+            Paragraph(str(row[0]), s["SMALL_BOLD"] if row[0] == "Sl.No" else s["SMALL"]),
+            Paragraph(str(row[1]), s["SMALL_BOLD"] if row[0] == "Sl.No" else s["SMALL"]),
+            Paragraph(str(row[2]), s["SMALL_BOLD"] if row[0] == "Sl.No" else s["SMALL"]),
+        ])
+
+    desc_table = Table(desc_rows, colWidths=["10%", "45%", "45%"])
+    desc_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), s["accent"]),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(desc_table)
+    story.append(Spacer(1, 10 * mm))
+
+    # Section 4 — Material Specs
+    story.append(Paragraph("Section-4 Basic Material Specifications", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    mat_data = [
+        ["Grade of Steel sections/Plates/ Make", "F250 Grade / JSW or SAIL or Equivalent"],
+        ["Grade of Purlin/Make", "Cold formed section – Yield Strength 240MPA"],
+        ["Anchor bolt", "EN8 Grade"],
+        ["Roofing Sheet thickness/ Grade", f"{roof_sheet} / JSW or Equivalent"],
+        ["Cladding Sheet thickness/ Grade", f"{side_cladding} / JSW or Equivalent"],
+        ["Structural members painting", "Enamel paint - Asian or Equivalent Make"],
+    ]
+    mat_rows = []
+    for row in mat_data:
+        mat_rows.append([Paragraph(row[0], s["SMALL_BOLD"]), Paragraph(row[1], s["SMALL"])])
+
+    mat_table = Table(mat_rows, colWidths=["40%", "60%"])
+    mat_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("BACKGROUND", (0, 0), (0, -1), s["light_bg"]),
+    ]))
+    story.append(mat_table)
+    story.append(PageBreak())
+
+
+def _work_descriptions(story, styles, data):
+    """Page 5: Work Descriptions."""
+    s = styles
+    params = data.get("building_params", data)
+    roof_sheet = _sheet_label(params.get("roof_sheet_type", ""))
+    side_cladding = _sheet_label(params.get("side_cladding_type", ""))
+
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Section-5 Work Descriptions", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    works = [
+        ("Anchor bolts", "Supply and fixing EN-8 Anchor bolt at site as per drawing"),
+        ("Primary members", "Main frame Column and Rafter, Gable End frame Column and Rafter – Supply & Erection"),
+        ("Secondary members", "Purlins, Girts, Bracings, Sag rods – Supply & Erection"),
+        ("Welding", "Automatic welding process - Flange & Web plate joined by one side continuous welding"),
+        ("Connections", "Primary members connected with 8.8 Grade Black bolts, Secondary members connected with 4.6 Grade GI bolts"),
+        ("Painting", "All Structural members will be painted after well cleaned"),
+        ("Roofing sheets", f"{roof_sheet} will be used for roofing"),
+        ("Cladding sheets", f"{side_cladding} will be used for wall cladding"),
+        ("Flashing sheets", "550 Mpa Grade Colour coated Galvalume sheet – Corner Flashing, Gable End flashing & wall flashing"),
+        ("Sheeting Screws", "Galvanized self-tapping sheet metal screws will be used"),
+        ("Eave Gutter & Down Spouts", "Colour coated Galvalume sheet Eave gutters & Downspouts will be used"),
+    ]
+
+    work_rows = [[
+        Paragraph("<b>Sl.No</b>", s["SMALL_BOLD"]),
+        Paragraph("<b>List of Works</b>", s["SMALL_BOLD"]),
+        Paragraph("<b>Descriptions</b>", s["SMALL_BOLD"]),
+    ]]
+    for i, (name, desc) in enumerate(works, 1):
+        work_rows.append([
+            Paragraph(str(i), s["SMALL"]),
+            Paragraph(name, s["SMALL_BOLD"]),
+            Paragraph(desc, s["SMALL"]),
+        ])
+
+    work_table = Table(work_rows, colWidths=["8%", "20%", "72%"])
+    work_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), s["accent"]),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    story.append(work_table)
+    story.append(PageBreak())
+
+
+def _price_and_payment(story, styles, data, boq, md_quoted_rate=None):
+    """Page 6: Price & Payment terms."""
+    s = styles
+    total_amount = boq.get("total_amount", 0)
+    floor_area = boq.get("floor_area", 0)
+    rate_per_sqft = boq.get("rate_per_sqft", 0)
+
+    # Use MD quoted rate if provided
+    if md_quoted_rate and floor_area > 0:
+        total_amount = md_quoted_rate * floor_area
+        rate_per_sqft = md_quoted_rate
+
+    gst_amount = total_amount * 0.18
+    total_with_gst = total_amount + gst_amount
+
+    params = data.get("building_params", data)
+    H = params.get("full_height", 0)
+
+    # Payment schedule defaults
+    payment = data.get("payment_schedule", {})
+    fab_pct = payment.get("fabrication_pct", 85)
+    erection_pct = payment.get("erection_pct", 15)
+    fab_total = total_with_gst * fab_pct / 100
+    erection_total = total_with_gst * erection_pct / 100
+
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Section-6 Price &amp; Payment terms", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    # Main price table
+    price_data = [
+        [Paragraph("<b>S.NO</b>", s["SMALL_BOLD"]),
+         Paragraph("<b>DESCRIPTION</b>", s["SMALL_BOLD"]),
+         Paragraph("<b>Total Amount (Rs.)</b>", s["SMALL_BOLD"]),
+         Paragraph("<b>Remarks</b>", s["SMALL_BOLD"])],
+        [Paragraph("1.0", s["SMALL"]),
+         Paragraph(f"PEB BUILDING - FABRICATION, ERECTION &amp; ROOFING SHEET WORKS AS PER ATTACHED BOQ", s["SMALL"]),
+         Paragraph(_fmt_inr(total_amount), s["CELL_R"]),
+         Paragraph("", s["SMALL"])],
+        [Paragraph("", s["SMALL"]),
+         Paragraph("<b>TOTAL AMOUNT (Rs.) (EXCLUDING GST)</b>", s["SMALL_BOLD"]),
+         Paragraph(f"<b>{_fmt_inr(total_amount)}</b>", s["CELL_RB"]),
+         Paragraph("", s["SMALL"])],
+        [Paragraph("", s["SMALL"]),
+         Paragraph("<b>GST - 18%</b>", s["SMALL_BOLD"]),
+         Paragraph(_fmt_inr(gst_amount), s["CELL_R"]),
+         Paragraph("", s["SMALL"])],
+        [Paragraph("", s["SMALL"]),
+         Paragraph("<b>TOTAL AMOUNT (Rs.)</b>", s["SMALL_BOLD"]),
+         Paragraph(f"<b>{_fmt_inr(total_with_gst)}</b>", s["CELL_RB"]),
+         Paragraph("", s["SMALL"])],
+    ]
+
+    price_table = Table(price_data, colWidths=["8%", "52%", "25%", "15%"])
+    price_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), s["accent"]),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    story.append(price_table)
+    story.append(Spacer(1, 6 * mm))
+
+    # Fabrication payment schedule
+    story.append(Paragraph(
+        f"<b>FABRICATION PAYMENT SCHEDULE ON {fab_pct}% OF TOTAL PROJECT VALUE - {_fmt_inr_round(fab_total)}</b>",
+        s["SMALL_BOLD"]
+    ))
+    story.append(Spacer(1, 2 * mm))
+
+    fab_schedule = [
+        ("1", "ADVANCE PAYMENT ALONG WITH WORK ORDER", "10%", fab_total * 0.10),
+        ("2", "TO START FABRICATION AFTER APPROVAL OF FABRICATION DRAWING", "60%", fab_total * 0.60),
+        ("3", "BEFORE DISPATCH AGAINST OUR PROFORMA INVOICE", "30%", fab_total * 0.30),
+    ]
+    fab_rows = []
+    for no, desc, pct, amt in fab_schedule:
+        fab_rows.append([
+            Paragraph(no, s["SMALL"]),
+            Paragraph(desc, s["SMALL"]),
+            Paragraph(pct, s["CELL_R"]),
+            Paragraph(_fmt_inr(amt), s["CELL_R"]),
+        ])
+    fab_table = Table(fab_rows, colWidths=["5%", "60%", "10%", "25%"])
+    fab_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(fab_table)
+    story.append(Spacer(1, 6 * mm))
+
+    # Erection payment schedule
+    story.append(Paragraph(
+        f"<b>ERECTION PAYMENT SCHEDULE ON {erection_pct}% OF TOTAL PROJECT VALUE - {_fmt_inr_round(erection_total)}</b>",
+        s["SMALL_BOLD"]
+    ))
+    story.append(Spacer(1, 2 * mm))
+
+    erect_schedule = [
+        ("1", "TO COMMENCE THE ERECTION WORKS", "50%", erection_total * 0.50),
+        ("2", "TO PARTIAL COMPLETION OF ERECTION WORKS", "40%", erection_total * 0.40),
+        ("3", "COMPLETION OF ERECTION & HANDOVER", "10%", erection_total * 0.10),
+    ]
+    erect_rows = []
+    for no, desc, pct, amt in erect_schedule:
+        erect_rows.append([
+            Paragraph(no, s["SMALL"]),
+            Paragraph(desc, s["SMALL"]),
+            Paragraph(pct, s["CELL_R"]),
+            Paragraph(_fmt_inr(amt), s["CELL_R"]),
+        ])
+    erect_table = Table(erect_rows, colWidths=["5%", "60%", "10%", "25%"])
+    erect_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(erect_table)
+    story.append(PageBreak())
+
+
+def _exclusions(story, styles, data):
+    """Page 7: Exclusions / Client scope — dynamic based on additions."""
+    s = styles
+    params = data.get("building_params", data)
+
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Section 7 Exclusion / Client scope", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    # Standard exclusions
+    exclusions = [
+        "Electricity 3 Phase supply & Water required during Erection to be provided by client.",
+        "Accommodation for erection labours to be provided by client.",
+        "Civil works and necessary scaffolding for erection excluded.",
+        "Except approval drawings additional works will be on client scope.",
+        "Grouting under column, civil column correction if any will be on client scope.",
+        "Electrical, plumbing, interior, masonry, handrail, partitions, glazing work are excluded.",
+        "Windows, doors & Rolling shutters are excluded.",
+    ]
+
+    # Dynamic exclusions based on what's NOT included in additions
+    dynamic_excluded = []
+    if not params.get("turbo_ventilator"):
+        dynamic_excluded.append("Turbo Ventilator")
+    if not params.get("aluminium_foil"):
+        dynamic_excluded.append("Aluminium Foil")
+    if not params.get("louvers"):
+        dynamic_excluded.append("Fixed Louvers")
+    if not params.get("crane"):
+        dynamic_excluded.append("Crane Bracket, Crane Girder, Gantry Girder")
+    if not params.get("ridge_vent") and not params.get("ridge_monitor"):
+        dynamic_excluded.append("Ridge Vent / Ridge Monitor")
+
+    if dynamic_excluded:
+        exclusions.append(f"{', '.join(dynamic_excluded)} are excluded.")
+
+    exclusions.append(
+        "Contracts are on agreed price basis for the given scope of work only. "
+        "We have the rights to claim unused materials from the site."
+    )
+
+    for exc in exclusions:
+        story.append(Paragraph(f"➤ {exc}", s["BULLET"]))
+
+    story.append(Spacer(1, 10 * mm))
+
+    # Section 8 — Delivery period
+    story.append(Paragraph("Section 8 Delivery period", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(
+        "Fabrication and material delivery duration <b>4 weeks</b> and Erection period "
+        "<b>4 weeks</b> from latest date of receipt and acceptance of the following, "
+        "whichever is later.",
+        s["BODY"]
+    ))
+    story.append(Spacer(1, 4 * mm))
+
+    delivery_items = [
+        "Work order/Purchase order or Signed contract",
+        "Fabrication drawing approval from client side",
+        "Down payment as per schedule",
+        "Change in work order/drawings/specification if any",
+        "Site difficulty/Rain during erection if any",
+    ]
+    for i, item in enumerate(delivery_items, 1):
+        story.append(Paragraph(f"{i}. {item}", s["BODY"]))
+    story.append(PageBreak())
+
+
+def _terms_and_conditions(story, styles):
+    """Page 8: General T&C."""
+    s = styles
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("Section 9 General Terms &amp; Conditions", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    terms = [
+        "This quotation is valid for 15 days.",
+        "Contractor shall not be responsible or liable for obtaining of Government permits/approval to the construction.",
+        ("FORCE MAJEURE: we shall not be liable for any loss or damage to the Client for delay in "
+         "delivery due to circumstances beyond control, such as, riots, civil commotion, revolution, "
+         "civil war, floods, fires, natural calamities, strikes and delays in non-availability of "
+         "transport for reasons such as Truckers Strikes etc. Any other circumstance or event beyond "
+         "the control of us."),
+        "Completion certificate after handover the buildings to be provided by client.",
+    ]
+    for i, term in enumerate(terms, 1):
+        story.append(Paragraph(f"{i}. {term}", s["BODY"]))
+        story.append(Spacer(1, 3 * mm))
+
+    story.append(Spacer(1, 10 * mm))
+    story.append(Paragraph("Thanking you,", s["BODY"]))
+    story.append(Paragraph("Yours Truly,", s["BODY"]))
+    story.append(Spacer(1, 10 * mm))
+    story.append(Paragraph(f"For {COMPANY['name']}", s["BODY_BOLD"]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(COMPANY["md_name"], s["BODY_BOLD"]))
+    story.append(Paragraph(COMPANY["md_title"], s["BODY"]))
+    story.append(PageBreak())
+
+
+def _summary_page(story, styles, data, boq, md_quoted_rate=None):
+    """Page 9: PROJECT COST SUMMARY."""
+    s = styles
+    params = data.get("building_params", data)
+    total_amount = boq.get("total_amount", 0)
+    floor_area = boq.get("floor_area", 0)
+    rate_per_sqft = boq.get("rate_per_sqft", 0)
+    H = params.get("full_height", 0)
+
+    if md_quoted_rate and floor_area > 0:
+        total_amount = md_quoted_rate * floor_area
+        rate_per_sqft = md_quoted_rate
+
+    client_name = data.get("client_name", "")
+    client_location = data.get("client_location", "")
+    project_name = data.get("project_name", "Proposed Industrial Building")
+
+    story.append(Spacer(1, 6 * mm))
+
+    # Project header
+    header_data = [
+        [Paragraph(f"<b>Project Name :</b> {project_name}", s["SMALL"]),
+         Paragraph("", s["SMALL"])],
+        [Paragraph(f"<b>Client :</b>", s["SMALL"]),
+         Paragraph(f"<b>Turnkey Contractor:</b>", s["SMALL"])],
+        [Paragraph(f"{client_name}", s["SMALL"]),
+         Paragraph(COMPANY["name"], s["SMALL"])],
+    ]
+    header_table = Table(header_data, colWidths=["50%", "50%"])
+    header_table.setStyle(TableStyle([
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 4 * mm))
+
+    story.append(Paragraph("<b>PEB BUILDING - PROJECT COST SUMMARY</b>", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    # Summary table
+    summary_data = [
+        [Paragraph("<b>S.NO</b>", s["TABLE_HEADER"]),
+         Paragraph("<b>DESCRIPTION</b>", s["TABLE_HEADER"]),
+         Paragraph("<b>Area (Sqft)</b>", s["TABLE_HEADER_R"]),
+         Paragraph("<b>Rate/Sqft (Rs.)</b>", s["TABLE_HEADER_R"]),
+         Paragraph("<b>Total Amount (Rs.)</b>", s["TABLE_HEADER_R"]),
+         Paragraph("<b>Remarks</b>", s["TABLE_HEADER"])],
+        [Paragraph("1.0", s["CELL"]),
+         Paragraph(f"PEB WORKS - FABRICATION, ERECTION &amp; SHEETING (EAVE HEIGHT {H:.0f}')", s["CELL"]),
+         Paragraph(f"{floor_area:,.0f}", s["CELL_R"]),
+         Paragraph(f"{rate_per_sqft:,.0f}", s["CELL_R"]),
+         Paragraph(f"{total_amount:,.2f}", s["CELL_RB"]),
+         Paragraph("", s["CELL"])],
+    ]
+
+    # Add turbo ventilator, shutters etc. as separate summary items
+    additions_items = []
+    if params.get("turbo_ventilator") and params.get("turbo_ventilator_count"):
+        count = params.get("turbo_ventilator_count", 0)
+        rate = 5750  # default
+        additions_items.append(("SUPPLYING & FIXING OF TURBO VENTILATOR (IN NOS)", count, rate))
+
+    if params.get("shutters") and params.get("shutters_count"):
+        count = params.get("shutters_count", 0)
+        size = params.get("shutters_size", "")
+        rate = 500
+        desc = f"SUPPLYING & FIXING OF ROLLING SHUTTER - {count} NOS"
+        if size:
+            desc += f" ({size})"
+        additions_items.append((desc, count, rate))
+
+    for idx, (desc, qty, rate) in enumerate(additions_items, 2):
+        amt = qty * rate
+        total_amount += amt
+        summary_data.append([
+            Paragraph(f"{idx}.0", s["CELL"]),
+            Paragraph(desc, s["CELL"]),
+            Paragraph(f"{qty:,.0f}", s["CELL_R"]),
+            Paragraph(f"{rate:,.0f}", s["CELL_R"]),
+            Paragraph(f"{amt:,.2f}", s["CELL_RB"]),
+            Paragraph("", s["CELL"]),
+        ])
+
+    # Total row
+    summary_data.append([
+        Paragraph("", s["CELL"]),
+        Paragraph("<b>TOTAL AMOUNT (Rs.) (EXCLUDING TAXES)</b>", s["CELL_RB"]),
+        Paragraph("", s["CELL"]),
+        Paragraph("", s["CELL"]),
+        Paragraph(f"<b>{total_amount:,.2f}</b>", s["CELL_RB"]),
+        Paragraph("", s["CELL"]),
+    ])
+
+    summary_table = Table(summary_data, colWidths=["8%", "37%", "13%", "13%", "18%", "11%"])
+    summary_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), s["accent"]),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, -1), (-1, -1), s["light_bg"]),
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 6 * mm))
 
-    # ── NOTES & EXCLUSIONS ──
-    NOTES_STYLE = ParagraphStyle("notes_h", fontSize=9, fontName="Helvetica-Bold",
-                                  textColor=dark_blue, spaceAfter=3)
-    NOTE_ITEM = ParagraphStyle("note_item", fontSize=7.5, fontName="Helvetica",
-                                leading=10, spaceAfter=2)
+    # Notes
+    story.append(Paragraph("<b>NOTE:-</b>", s["SMALL_BOLD"]))
+    dynamic_excluded = []
+    if not params.get("turbo_ventilator"):
+        dynamic_excluded.append("Turbo Ventilator")
+    if not params.get("aluminium_foil"):
+        dynamic_excluded.append("Aluminium Foil")
+    if not params.get("louvers"):
+        dynamic_excluded.append("Fixed Louvers")
+    if not params.get("crane"):
+        dynamic_excluded.append("Crane Bracket, Crane Girder, Gantry Girder")
 
-    story.append(Paragraph("NOTES &amp; EXCLUSIONS:", NOTES_STYLE))
-    notes = [
-        "Aluminium Foil, Fixed Louvers, Special Elevations, Foundation &amp; Civil Works, "
-        "Rolling Shutters, Windows with Safety Grills, Doors, Electrical &amp; Plumbing Works "
-        "are NOT included.",
-        "All rates are exclusive of GST (18% applicable on structural steel works, "
-        "12% on PEB fabrication and erection).",
-        "This quote is valid for 30 days from the date of issue.",
-        "Payment terms: 30% advance, 60% on delivery, 10% on completion.",
+    excl_parts = dynamic_excluded + [
+        "Special Elevations", "Foundation & Civil Works", "Rolling Shutters" if not params.get("shutters") else None,
+        "Windows with Safety Grills", "Door", "Electrical & Plumbing Works"
     ]
-    for i, note in enumerate(notes, 1):
-        story.append(Paragraph(f"{i}. {note}", NOTE_ITEM))
-    story.append(Spacer(1, 6 * mm))
-
-    # ── Footer ──
-    story.append(HRFlowable(width="100%", thickness=1, color=accent))
-    story.append(Spacer(1, 2 * mm))
+    excl_parts = [e for e in excl_parts if e]
     story.append(Paragraph(
-        f"Swetha Structures Pvt Ltd | www.swethastructures.com | "
-        f"Quote generated on {quote_date}",
-        FOOTER
+        f"1. {', '.join(excl_parts)} are not included.",
+        s["SMALL"]
     ))
-
-    doc.build(story)
-    buf.seek(0)
-    return buf.read()
-
-
-# ---------------------------------------------------------------------------
-# Premium tenant-branded renderer (multi-page)
-# ---------------------------------------------------------------------------
-
-def _render_premium(quotation, lead=None, tenant_branding=None,
-                    portal_url=None, render_3d_path=None) -> bytes:
-    if not REPORTLAB_AVAILABLE:
-        raise RuntimeError("reportlab not installed. Run: pip install reportlab")
-
-    # ----- Branding -----
-    tb = tenant_branding or {}
-    tenant_name = tb.get("name") or "Your Company"
-    primary = _hex(tb.get("primary_color"), default="#6366f1")  # indigo
-    slate = colors.HexColor("#1e293b")
-    slate_light = colors.HexColor("#64748b")
-    bg_light = colors.HexColor("#f8fafc")
-    border_light = colors.HexColor("#e2e8f0")
-    logo_url = tb.get("logo_url")
-
-    # ----- Quotation data extraction -----
-    q_id = _get_attr(quotation, "id", "—")
-    project_name = _get_attr(quotation, "project_name", "Untitled Project") or "Untitled Project"
-    client_name = _get_attr(quotation, "client_name", "") or ""
-    client_phone = _get_attr(quotation, "client_phone", "") or _get_attr(lead, "phone", "") or ""
-    client_email = _get_attr(quotation, "client_email", "") or _get_attr(lead, "email", "") or ""
-    client_location = _get_attr(quotation, "client_location", "") or ""
-
-    building_params = _get_attr(quotation, "building_params", {}) or {}
-    form_data = _get_attr(quotation, "form_data", {}) or {}
-    specs = building_params or form_data or {}
-
-    boq_results = _get_attr(quotation, "boq_results", {}) or {}
-    total_amount = (
-        _get_attr(quotation, "total_amount", None)
-        or boq_results.get("total_amount", 0)
-        or 0
-    )
-
-    created_at = _get_attr(quotation, "created_at", None) or datetime.now()
-    valid_until = _get_attr(quotation, "valid_until", None)
-    revision = _get_attr(quotation, "revision", 1) or 1
-
-    template = _get_attr(quotation, "template", None)
-    terms_text = _get_attr(template, "terms_conditions", None)
-
-    # ----- Document setup -----
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        rightMargin=18 * mm, leftMargin=18 * mm,
-        topMargin=18 * mm, bottomMargin=18 * mm,
-        title=f"Quotation Q-{q_id} - {project_name}",
-        author=tenant_name,
-    )
-    page_w = A4[0] - 36 * mm
-
-    # ----- Styles -----
-    H_HUGE = ParagraphStyle("huge", fontSize=34, leading=40, textColor=slate,
-                             fontName="Helvetica-Bold", alignment=TA_LEFT, spaceAfter=4)
-    H_BIG = ParagraphStyle("big", fontSize=22, leading=26, textColor=primary,
-                            fontName="Helvetica-Bold", alignment=TA_LEFT, spaceAfter=2)
-    H_PAGE = ParagraphStyle("hpage", fontSize=18, leading=22, textColor=slate,
-                             fontName="Helvetica-Bold", spaceAfter=8)
-    H_SECTION = ParagraphStyle("hsec", fontSize=11, leading=14, textColor=primary,
-                                fontName="Helvetica-Bold", spaceAfter=4,
-                                spaceBefore=4)
-    LABEL = ParagraphStyle("label", fontSize=8, textColor=slate_light,
-                            fontName="Helvetica-Bold", leading=10, spaceAfter=2)
-    VALUE = ParagraphStyle("value", fontSize=11, textColor=slate,
-                            fontName="Helvetica", leading=14, spaceAfter=6)
-    BODY = ParagraphStyle("body", fontSize=10, textColor=slate, leading=14,
-                           fontName="Helvetica")
-    SMALL = ParagraphStyle("small", fontSize=8, textColor=slate_light, leading=11,
-                            fontName="Helvetica")
-    META = ParagraphStyle("meta", fontSize=10, textColor=slate_light,
-                           fontName="Helvetica", leading=14)
-    TOTAL_HUGE = ParagraphStyle("tothuge", fontSize=42, leading=48, textColor=primary,
-                                 fontName="Helvetica-Bold", alignment=TA_LEFT)
-    TERMS_ITEM = ParagraphStyle("terms", fontSize=10, textColor=slate, leading=15,
-                                 fontName="Helvetica", spaceAfter=8, leftIndent=18,
-                                 firstLineIndent=-18)
-
-    story = []
-
-    # ===========================================================
-    # PAGE 1 — COVER
-    # ===========================================================
-    # Logo area
-    logo_flowable = None
-    if logo_url:
-        resolved = _resolve_image_path(logo_url)
-        if resolved:
-            try:
-                logo_flowable = Image(resolved, width=40 * mm, height=20 * mm,
-                                       kind="proportional")
-            except Exception:
-                logo_flowable = None
-    if logo_flowable is None:
-        # Colored square placeholder with initials
-        initials = "".join([w[0] for w in tenant_name.split()[:2]]).upper() or "•"
-        logo_box = Table(
-            [[Paragraph(f"<font color='white'>{initials}</font>",
-                        ParagraphStyle("li", fontSize=20, fontName="Helvetica-Bold",
-                                        alignment=TA_CENTER, textColor=colors.white))]],
-            colWidths=[20 * mm], rowHeights=[20 * mm]
-        )
-        logo_box.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), primary),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("BOX", (0, 0), (-1, -1), 0, primary),
-        ]))
-        logo_flowable = logo_box
-
-    # Top bar: logo + tenant name
-    top_bar = Table(
-        [[logo_flowable, Paragraph(tenant_name, H_BIG)]],
-        colWidths=[45 * mm, page_w - 45 * mm]
-    )
-    top_bar.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(top_bar)
-    story.append(Spacer(1, 4 * mm))
-    story.append(HRFlowable(width="100%", thickness=2, color=primary))
-    story.append(Spacer(1, 14 * mm))
-
-    # Quotation metadata
-    quote_date = created_at.strftime("%d %b %Y") if hasattr(created_at, "strftime") else str(created_at)
-    valid_str = valid_until.strftime("%d %b %Y") if hasattr(valid_until, "strftime") else (str(valid_until) if valid_until else "—")
-
-    story.append(Paragraph("QUOTATION", ParagraphStyle(
-        "qlbl", fontSize=10, textColor=slate_light, fontName="Helvetica-Bold",
-        spaceAfter=4
-    )))
-    story.append(Paragraph(f"#Q-{q_id} &nbsp;&nbsp;·&nbsp;&nbsp; Rev {revision}",
-                            ParagraphStyle("qid", fontSize=12, textColor=slate,
-                                            fontName="Helvetica", spaceAfter=18)))
-
-    # Huge project name
-    story.append(Paragraph(project_name, H_HUGE))
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(f"Prepared for <b>{client_name or '—'}</b>", META))
-    story.append(Spacer(1, 14 * mm))
-
-    # Total amount card
-    total_card_data = [
-        [Paragraph("TOTAL CONTRACT VALUE", LABEL)],
-        [Paragraph(_fmt_inr(total_amount), TOTAL_HUGE)],
-    ]
-    total_card = Table(total_card_data, colWidths=[page_w])
-    total_card.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), bg_light),
-        ("BOX", (0, 0), (-1, -1), 0, border_light),
-        ("LEFTPADDING", (0, 0), (-1, -1), 18),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 18),
-        ("TOPPADDING", (0, 0), (0, 0), 14),
-        ("BOTTOMPADDING", (0, 1), (0, 1), 14),
-        ("LINEBEFORE", (0, 0), (0, -1), 4, primary),
-    ]))
-    story.append(total_card)
-    story.append(Spacer(1, 10 * mm))
-
-    # Date / valid until row
-    date_row = Table(
-        [[
-            Paragraph("ISSUED", LABEL),
-            Paragraph("VALID UNTIL", LABEL),
-        ],
-         [
-            Paragraph(quote_date, VALUE),
-            Paragraph(valid_str, VALUE),
-         ]],
-        colWidths=[page_w / 2, page_w / 2]
-    )
-    date_row.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
-    story.append(date_row)
-    story.append(Spacer(1, 10 * mm))
-
-    # Hero render
-    hero_path = _resolve_image_path(render_3d_path)
-    if hero_path:
-        try:
-            hero_img = Image(hero_path, width=page_w, height=85 * mm,
-                              kind="proportional")
-            story.append(hero_img)
-        except Exception:
-            pass
-
     story.append(PageBreak())
 
-    # ===========================================================
-    # PAGE 2 — PROJECT DETAILS
-    # ===========================================================
-    story.append(Paragraph("Project Details", H_PAGE))
-    story.append(HRFlowable(width="100%", thickness=1, color=primary))
-    story.append(Spacer(1, 8 * mm))
 
-    # Client column
-    client_rows = [
-        [Paragraph("CLIENT NAME", LABEL)],
-        [Paragraph(client_name or "—", VALUE)],
-        [Paragraph("PHONE", LABEL)],
-        [Paragraph(client_phone or "—", VALUE)],
-        [Paragraph("EMAIL", LABEL)],
-        [Paragraph(client_email or "—", VALUE)],
-        [Paragraph("SITE LOCATION", LABEL)],
-        [Paragraph(client_location or "—", VALUE)],
+def _abstract_boq(story, styles, data, boq, md_quoted_rate=None):
+    """Page 10: ABSTRACT ESTIMATE — the detailed BOQ table."""
+    s = styles
+    params = data.get("building_params", data)
+    client_name = data.get("client_name", "")
+    project_name = data.get("project_name", "Proposed Industrial Building")
+    client_location = data.get("client_location", "")
+
+    story.append(Spacer(1, 4 * mm))
+
+    # Header
+    header_data = [
+        [Paragraph(f"<b>Project Name :</b> {project_name}", s["SMALL"]),
+         Paragraph("", s["SMALL"])],
+        [Paragraph(f"<b>Client :</b> {client_name}", s["SMALL"]),
+         Paragraph(f"<b>Turnkey Contractor:</b> {COMPANY['name']}", s["SMALL"])],
     ]
+    ht = Table(header_data, colWidths=["50%", "50%"])
+    ht.setStyle(TableStyle([
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(ht)
+    story.append(Spacer(1, 4 * mm))
 
-    # Building specs column
-    spec_rows = [[Paragraph("BUILDING SPECIFICATIONS", LABEL)]]
-    if specs:
-        spec_keys = [
-            ("building_length", "Length", "ft"),
-            ("building_width", "Width", "ft"),
-            ("full_height", "Full Height", "ft"),
-            ("wall_height", "Wall Height", "ft"),
-            ("roof_type", "Roof Type", ""),
-            ("roof_sheet_type", "Roof Sheet", ""),
-            ("side_cladding_type", "Side Cladding", ""),
-            ("mezzanine_required", "Mezzanine", ""),
+    story.append(Paragraph("<b>ABSTRACT ESTIMATE FOR PEB WORKS - INDUSTRIAL BUILDING</b>", s["H_SECTION"]))
+    story.append(Spacer(1, 4 * mm))
+
+    items = boq.get("items", [])
+    has_rate_split = any(item.get("material_rate") is not None for item in items)
+
+    if has_rate_split:
+        # With Material + Labour columns (like Krishnamoorthy PDF)
+        col_headers = [
+            Paragraph("<b>Item No</b>", s["TABLE_HEADER"]),
+            Paragraph("<b>Description of work/Items</b>", s["TABLE_HEADER"]),
+            Paragraph("<b>Unit</b>", s["TABLE_HEADER"]),
+            Paragraph("<b>Quantity</b>", s["TABLE_HEADER_R"]),
+            Paragraph("<b>Material Rate</b>", s["TABLE_HEADER_R"]),
+            Paragraph("<b>Labour Rate</b>", s["TABLE_HEADER_R"]),
+            Paragraph("<b>Total Rate</b>", s["TABLE_HEADER_R"]),
+            Paragraph("<b>Amount</b>", s["TABLE_HEADER_R"]),
         ]
-        for key, label, unit in spec_keys:
-            if key in specs and specs[key] not in (None, ""):
-                val = specs[key]
-                if isinstance(val, bool):
-                    val = "Yes" if val else "No"
-                elif isinstance(val, (int, float)) and unit:
-                    val = f"{val} {unit}"
-                else:
-                    val = str(val).replace("_", " ").title()
-                spec_rows.append([Paragraph(
-                    f"<font color='#64748b'>{label}:</font> &nbsp;<b>{val}</b>",
-                    BODY
-                )])
-        # Floor area if available
-        L = specs.get("building_length")
-        W = specs.get("building_width")
-        if L and W:
-            try:
-                area = float(L) * float(W)
-                spec_rows.append([Paragraph(
-                    f"<font color='#64748b'>Floor Area:</font> &nbsp;<b>{area:,.0f} sqft</b>",
-                    BODY
-                )])
-            except Exception:
-                pass
+        col_widths = ["7%", "33%", "7%", "10%", "10%", "10%", "10%", "13%"]
     else:
-        spec_rows.append([Paragraph("No specifications provided.", SMALL)])
+        col_headers = [
+            Paragraph("<b>Item No</b>", s["TABLE_HEADER"]),
+            Paragraph("<b>Description of work/Items</b>", s["TABLE_HEADER"]),
+            Paragraph("<b>Unit</b>", s["TABLE_HEADER"]),
+            Paragraph("<b>Quantity</b>", s["TABLE_HEADER_R"]),
+            Paragraph("<b>Rate</b>", s["TABLE_HEADER_R"]),
+            Paragraph("<b>Amount</b>", s["TABLE_HEADER_R"]),
+        ]
+        col_widths = ["8%", "42%", "8%", "12%", "12%", "18%"]
 
-    client_table = Table(client_rows, colWidths=[(page_w - 8 * mm) / 2])
-    client_table.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 1),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-    ]))
-    spec_table = Table(spec_rows, colWidths=[(page_w - 8 * mm) / 2])
-    spec_table.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
+    boq_rows = [col_headers]
+    prev_cat = ""
 
-    grid = Table(
-        [[client_table, spec_table]],
-        colWidths=[(page_w - 8 * mm) / 2 + 4 * mm, (page_w - 8 * mm) / 2 + 4 * mm]
-    )
-    grid.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    story.append(grid)
-    story.append(PageBreak())
-
-    # ===========================================================
-    # PAGE 3 — BOQ TABLE
-    # ===========================================================
-    story.append(Paragraph("Bill of Quantities", H_PAGE))
-    story.append(HRFlowable(width="100%", thickness=1, color=primary))
-    story.append(Spacer(1, 6 * mm))
-
-    SMALL_BOLD = ParagraphStyle("sb", fontSize=8, fontName="Helvetica-Bold",
-                                 leading=10, textColor=colors.white)
-    CELL = ParagraphStyle("cell", fontSize=8, fontName="Helvetica", leading=11,
-                           textColor=slate)
-    CELL_R = ParagraphStyle("cellr", fontSize=8, fontName="Helvetica", leading=11,
-                             alignment=TA_RIGHT, textColor=slate)
-    CELL_RB = ParagraphStyle("cellrb", fontSize=8, fontName="Helvetica-Bold",
-                              leading=11, alignment=TA_RIGHT, textColor=slate)
-
-    col_pct = [0.08, 0.40, 0.10, 0.12, 0.13, 0.17]
-    col_widths = [p * page_w for p in col_pct]
-
-    boq_header = [
-        Paragraph("Item", SMALL_BOLD),
-        Paragraph("Description", SMALL_BOLD),
-        Paragraph("Unit", SMALL_BOLD),
-        Paragraph("Qty", ParagraphStyle("hr", parent=SMALL_BOLD, alignment=TA_RIGHT)),
-        Paragraph("Rate", ParagraphStyle("hr2", parent=SMALL_BOLD, alignment=TA_RIGHT)),
-        Paragraph("Amount", ParagraphStyle("hr3", parent=SMALL_BOLD, alignment=TA_RIGHT)),
-    ]
-
-    items = boq_results.get("items", []) if isinstance(boq_results, dict) else []
-    boq_rows = [boq_header]
     for item in items:
-        desc_text = item.get("description", "")
-        if item.get("sub_note"):
-            desc_text += f"<br/><font size='7' color='#64748b'><i>{item['sub_note']}</i></font>"
-        boq_rows.append([
-            Paragraph(str(item.get("item_no", "")), CELL),
-            Paragraph(desc_text, CELL),
-            Paragraph(str(item.get("unit", "")), CELL),
-            Paragraph(_fmt_qty(item.get("quantity", 0)), CELL_R),
-            Paragraph(_fmt_qty(item.get("rate", 0)), CELL_R),
-            Paragraph(_fmt_qty(item.get("amount", 0)), CELL_RB),
-        ])
+        cat = item.get("category", "")
+        if cat and cat != prev_cat:
+            if has_rate_split:
+                boq_rows.append([
+                    Paragraph("", s["SMALL_BOLD"]),
+                    Paragraph(f"<b>{cat}</b>", s["SMALL_BOLD"]),
+                    "", "", "", "", "", ""
+                ])
+            else:
+                boq_rows.append([
+                    Paragraph("", s["SMALL_BOLD"]),
+                    Paragraph(f"<b>{cat}</b>", s["SMALL_BOLD"]),
+                    "", "", "", ""
+                ])
+            prev_cat = cat
 
-    # Total row
-    boq_rows.append([
-        "", Paragraph("<b>TOTAL</b>", ParagraphStyle(
-            "tot", fontSize=10, fontName="Helvetica-Bold", textColor=colors.white)),
-        "", "", "",
-        Paragraph(f"<b>{_fmt_inr(total_amount)}</b>", ParagraphStyle(
-            "totr", fontSize=11, fontName="Helvetica-Bold",
-            alignment=TA_RIGHT, textColor=colors.white))
-    ])
+        desc_text = item.get("description", "").replace("\n", "<br/>")
+
+        if has_rate_split:
+            boq_rows.append([
+                Paragraph(str(item.get("item_no", "")), s["CELL"]),
+                Paragraph(desc_text, s["CELL"]),
+                Paragraph(str(item.get("unit", "")), s["CELL"]),
+                Paragraph(_fmt_qty(item.get("quantity", 0)), s["CELL_R"]),
+                Paragraph(_fmt_qty(item.get("material_rate", 0)), s["CELL_R"]),
+                Paragraph(_fmt_qty(item.get("labour_rate", 0)), s["CELL_R"]),
+                Paragraph(_fmt_qty(item.get("rate", 0)), s["CELL_R"]),
+                Paragraph(_fmt_qty(item.get("amount", 0)), s["CELL_RB"]),
+            ])
+        else:
+            boq_rows.append([
+                Paragraph(str(item.get("item_no", "")), s["CELL"]),
+                Paragraph(desc_text, s["CELL"]),
+                Paragraph(str(item.get("unit", "")), s["CELL"]),
+                Paragraph(_fmt_qty(item.get("quantity", 0)), s["CELL_R"]),
+                Paragraph(_fmt_qty(item.get("rate", 0)), s["CELL_R"]),
+                Paragraph(_fmt_qty(item.get("amount", 0)), s["CELL_RB"]),
+            ])
+
+    # Totals
+    total_estimated = boq.get("total_amount", 0)
+    floor_area = boq.get("floor_area", 0)
+    rate_estimated = boq.get("rate_per_sqft", 0)
+
+    quoted_rate = md_quoted_rate or math.floor(rate_estimated)
+    quoted_total = quoted_rate * floor_area if floor_area > 0 else total_estimated
+
+    ncols = 8 if has_rate_split else 6
+    amt_col = ncols - 1
+    span_cols = ncols - 2
+
+    # Total estimated row
+    total_row = [""] * ncols
+    total_row[0] = ""
+    total_row[1] = Paragraph("<b>TOTAL ESTIMATED AMOUNT (RS.)</b>", s["CELL_RB"])
+    total_row[amt_col] = Paragraph(f"<b>{_fmt_qty(total_estimated)}</b>", s["CELL_RB"])
+    boq_rows.append(total_row)
+
+    # Area row
+    area_row = [""] * ncols
+    area_row[1] = Paragraph("AREA OF THE BUILDING (SQ.FT)", s["CELL"])
+    area_row[amt_col] = Paragraph(f"{floor_area:,.0f}", s["CELL_R"])
+    boq_rows.append(area_row)
+
+    # Estimated rate
+    est_row = [""] * ncols
+    est_row[1] = Paragraph("RATE/ SQFT - ESTIMATED", s["CELL"])
+    est_row[amt_col] = Paragraph(f"{rate_estimated:,.2f}", s["CELL_R"])
+    boq_rows.append(est_row)
+
+    # Quoted rate + cost
+    quoted_row = [""] * ncols
+    quoted_row[1] = Paragraph("<b>QUOTED RATE/ SQ.FT  &amp;  PROJECT COST (RS.) (EXCLUDING TAXES)</b>", s["CELL_RB"])
+    quoted_row[amt_col] = Paragraph(
+        f"<b>{quoted_rate:,.0f} /SFT &amp; RS. {quoted_total:,.2f}</b>", s["CELL_RB"])
+    boq_rows.append(quoted_row)
 
     boq_table = Table(boq_rows, colWidths=col_widths, repeatRows=1)
     ts = TableStyle([
-        # Header
-        ("BACKGROUND", (0, 0), (-1, 0), primary),
+        ("BACKGROUND", (0, 0), (-1, 0), s["accent"]),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("TOPPADDING", (0, 0), (-1, 0), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        # Body
-        ("TOPPADDING", (0, 1), (-1, -2), 6),
-        ("BOTTOMPADDING", (0, 1), (-1, -2), 6),
+        ("GRID", (0, 0), (-1, -1), 0.5, s["border"]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LINEBELOW", (0, 0), (-1, -2), 0.5, border_light),
-        # Total row
-        ("BACKGROUND", (0, -1), (-1, -1), primary),
-        ("TOPPADDING", (0, -1), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, -1), (-1, -1), 10),
-        ("SPAN", (1, -1), (4, -1)),
+        ("BACKGROUND", (0, -4), (-1, -1), s["light_bg"]),
+        ("LINEABOVE", (0, -4), (-1, -4), 1, s["accent"]),
     ])
-    # Zebra
-    for i in range(1, len(boq_rows) - 1):
-        if i % 2 == 0:
-            ts.add("BACKGROUND", (0, i), (-1, i), bg_light)
-
     boq_table.setStyle(ts)
     story.append(boq_table)
-    story.append(PageBreak())
-
-    # ===========================================================
-    # PAGE 4 — TERMS & CONDITIONS
-    # ===========================================================
-    story.append(Paragraph("Terms &amp; Conditions", H_PAGE))
-    story.append(HRFlowable(width="100%", thickness=1, color=primary))
-    story.append(Spacer(1, 8 * mm))
-
-    if terms_text:
-        # Try to parse as numbered or line-separated list
-        if isinstance(terms_text, (list, tuple)):
-            terms_list = [str(t) for t in terms_text]
-        else:
-            raw = str(terms_text).strip()
-            terms_list = [ln.strip() for ln in raw.split("\n") if ln.strip()]
-    else:
-        terms_list = [
-            "All rates are exclusive of GST. Applicable taxes will be charged at actuals.",
-            "This quotation is valid for 30 days from the date of issue.",
-            "Payment terms: 30% advance with PO, 60% on material delivery, 10% on completion.",
-            "Foundation, civil works, electrical, plumbing, and finishing works are not included.",
-            "Delivery timeline: 8-12 weeks from receipt of advance and approved drawings.",
-            "Site should be accessible for trailers and provide adequate space for material storage.",
-            "Any change in specifications or scope will be charged extra as per mutual agreement.",
-            "Force majeure conditions apply.",
-        ]
-
-    for idx, t in enumerate(terms_list, 1):
-        # Strip any leading numbering already in the source
-        cleaned = t.lstrip("0123456789.) ").strip() or t
-        story.append(Paragraph(f"<b>{idx}.</b>&nbsp;&nbsp;{cleaned}", TERMS_ITEM))
-
-    story.append(PageBreak())
-
-    # ===========================================================
-    # PAGE 5 — SIGNATURES + QR
-    # ===========================================================
-    story.append(Paragraph("Acceptance", H_PAGE))
-    story.append(HRFlowable(width="100%", thickness=1, color=primary))
-    story.append(Spacer(1, 14 * mm))
-
-    sign_label = ParagraphStyle("sl", fontSize=9, textColor=slate_light,
-                                 fontName="Helvetica-Bold", spaceAfter=2)
-    sign_for = ParagraphStyle("sf", fontSize=11, textColor=slate,
-                               fontName="Helvetica-Bold", spaceAfter=30)
-    sign_meta = ParagraphStyle("sm", fontSize=8, textColor=slate_light,
-                                fontName="Helvetica", leading=11)
-
-    def _signature_box(for_text):
-        cell = [
-            [Paragraph("AUTHORISED SIGNATORY", sign_label)],
-            [Paragraph(for_text, sign_for)],
-            [Spacer(1, 18 * mm)],
-            [HRFlowable(width="90%", thickness=0.75, color=slate)],
-            [Paragraph("Signature", sign_meta)],
-            [Spacer(1, 4 * mm)],
-            [HRFlowable(width="60%", thickness=0.75, color=slate)],
-            [Paragraph("Name &amp; Date", sign_meta)],
-        ]
-        t = Table(cell, colWidths=[(page_w - 10 * mm) / 2])
-        t.setStyle(TableStyle([
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ("BOX", (0, 0), (-1, -1), 0.5, border_light),
-        ]))
-        return t
-
-    sig_grid = Table(
-        [[_signature_box(f"For {tenant_name}"), _signature_box("For the Client")]],
-        colWidths=[(page_w) / 2, (page_w) / 2]
-    )
-    sig_grid.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(sig_grid)
-    story.append(Spacer(1, 18 * mm))
-
-    # QR code
-    if portal_url and QR_AVAILABLE:
-        qr_bio = _generate_qr_bytes(portal_url)
-        if qr_bio is not None:
-            try:
-                qr_img = Image(qr_bio, width=32 * mm, height=32 * mm)
-                qr_caption = Paragraph(
-                    "<b>Scan to view 3D model, drawings, and negotiate price</b><br/>"
-                    f"<font size='8' color='#64748b'>{portal_url}</font>",
-                    ParagraphStyle("qrcap", fontSize=10, textColor=slate,
-                                    fontName="Helvetica", leading=14)
-                )
-                qr_table = Table(
-                    [[qr_img, qr_caption]],
-                    colWidths=[40 * mm, page_w - 40 * mm]
-                )
-                qr_table.setStyle(TableStyle([
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("BACKGROUND", (0, 0), (-1, -1), bg_light),
-                    ("BOX", (0, 0), (-1, -1), 0, border_light),
-                    ("LINEBEFORE", (0, 0), (0, -1), 3, primary),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-                    ("TOPPADDING", (0, 0), (-1, -1), 10),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                ]))
-                story.append(qr_table)
-            except Exception:
-                pass
-
-    # ----- Footer on each page -----
-    def _footer(canvas, doc_):
-        canvas.saveState()
-        canvas.setFont("Helvetica", 8)
-        canvas.setFillColor(slate_light)
-        footer_text = f"{tenant_name}  ·  Quotation #Q-{q_id}  ·  Page {doc_.page}"
-        canvas.drawCentredString(A4[0] / 2, 10 * mm, footer_text)
-        canvas.setStrokeColor(primary)
-        canvas.setLineWidth(1)
-        canvas.line(18 * mm, 13 * mm, A4[0] - 18 * mm, 13 * mm)
-        canvas.restoreState()
-
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
-    buf.seek(0)
-    return buf.read()
 
 
-# ---------------------------------------------------------------------------
-# Public entry point — backward compatible dispatcher
-# ---------------------------------------------------------------------------
+# ─── Main Entry Point ────────────────────────────────────────────────────────
 
 def generate_quotation_pdf(quotation, lead=None, *,
                             tenant_branding=None,
                             portal_url=None,
                             render_3d_path=None,
                             **legacy_kwargs) -> bytes:
-    """Generate a quotation PDF.
+    """Generate a Swetha Structures proposal PDF.
 
-    Backward-compatible signature:
+    Backward-compatible:
         - Legacy: generate_quotation_pdf(data: dict, boq: dict)
-            -> renders the original Swetha-branded layout.
-        - Premium: generate_quotation_pdf(quotation_obj,
-                                          lead=None,
-                                          tenant_branding={...},
-                                          portal_url=...,
-                                          render_3d_path=...)
-            -> renders the multi-page tenant-branded layout.
-
-    Detection: if `quotation` is a dict and `lead` is also a dict, the legacy
-    renderer is used (preserving the existing quotation_service caller).
+        - New: generate_quotation_pdf(quotation_obj, lead=None, ...)
     """
-    # Legacy path: both positionals are dicts (data, boq).
-    if isinstance(quotation, dict) and isinstance(lead, dict):
-        return _render_legacy(quotation, lead)
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab not installed. Run: pip install reportlab")
 
-    # Premium path: quotation may be an ORM object or dict-like.
-    return _render_premium(
-        quotation,
-        lead=lead,
-        tenant_branding=tenant_branding,
-        portal_url=portal_url,
-        render_3d_path=render_3d_path,
+    # Detect legacy call: both args are dicts
+    if isinstance(quotation, dict) and isinstance(lead, dict):
+        data = quotation
+        boq = lead
+    elif isinstance(quotation, dict):
+        data = quotation
+        boq = quotation.get("boq_results", {}) or {}
+    else:
+        # ORM object
+        data = {
+            "project_name": _get_attr(quotation, "project_name", ""),
+            "client_name": _get_attr(quotation, "client_name", ""),
+            "client_location": _get_attr(quotation, "client_location", ""),
+            "building_params": _get_attr(quotation, "building_params", {}) or {},
+        }
+        boq = _get_attr(quotation, "boq_results", {}) or {}
+        if lead:
+            data["client_name"] = data["client_name"] or _get_attr(lead, "name", "")
+            data["client_location"] = data["client_location"] or _get_attr(lead, "city", "")
+
+    # Extract MD quoted rate
+    md_quoted_rate = data.get("md_quoted_rate") or (
+        _get_attr(quotation, "md_quoted_rate", None) if not isinstance(quotation, dict) else None
     )
+
+    styles = _build_styles()
+
+    # PR number
+    now = datetime.now()
+    q_id = data.get("id") or _get_attr(quotation, "id", "001")
+    pr_no = f"SS/{now.strftime('%y')}-{int(now.strftime('%y'))+1}/SSPB-{str(q_id).zfill(3)}"
+    quote_date = now.strftime("%d %B %Y")
+
+    # Build document
+    buf = io.BytesIO()
+    on_page, on_later = _make_header_footer(styles, pr_no, [0])
+
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        rightMargin=15 * mm, leftMargin=15 * mm,
+        topMargin=35 * mm, bottomMargin=18 * mm,
+        title=f"PEB Proposal - {data.get('project_name', '')}",
+        author=COMPANY["name"],
+    )
+
+    story = []
+
+    # Build all sections
+    _cover_letter(story, styles, data, pr_no, quote_date)
+    _contents_page(story, styles)
+    _scope_and_standards(story, styles)
+    _building_description(story, styles, data)
+    _work_descriptions(story, styles, data)
+    _price_and_payment(story, styles, data, boq, md_quoted_rate)
+    _exclusions(story, styles, data)
+    _terms_and_conditions(story, styles)
+    _summary_page(story, styles, data, boq, md_quoted_rate)
+    _abstract_boq(story, styles, data, boq, md_quoted_rate)
+
+    doc.build(story, onFirstPage=on_page, onLaterPages=on_later)
+    buf.seek(0)
+    return buf.read()
