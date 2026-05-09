@@ -5,16 +5,15 @@
 # ============================================
 
 # API Framework
-fastapi==0.104.1
+# Bumped from 0.104.1 -> 0.115.x: 0.104 capped anyio<4.0.0, which conflicted
+# with google-genai (requires anyio>=4) under pip's strict resolver. 0.115
+# declares anyio<5,>=3.7.1 so the tree resolves cleanly.
+fastapi>=0.115.0,<0.116
 uvicorn[standard]==0.24.0
 python-multipart>=0.0.12  # CVE-2024-24762 ReDoS — fixed in 0.0.7+
 websockets==12.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
-# anyio is pinned to <5 because FastAPI 0.104 declares anyio<4 in its
-# install_requires, but google-genai pulls in anyio>=4. anyio 4 works fine
-# in practice with FastAPI 0.104; the constraint here just keeps a fresh
-# pip install deterministic.
 anyio>=4.0,<5
 
 # Database
