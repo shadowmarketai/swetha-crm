@@ -9,7 +9,7 @@ import api from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import {
   Settings, RefreshCw, Check, ExternalLink, Copy, AlertCircle, Loader2,
-  ChevronDown, Globe,
+  ChevronDown, Globe, Facebook, X,
 } from 'lucide-react';
 import {
   Card, Stat, Button, Input, Field, PageHeader, Badge, Skeleton, EmptyState,
@@ -43,16 +43,13 @@ const SOURCES = [
   {
     provider: 'facebook_leads',
     name: 'Facebook Lead Ads',
-    description: 'Meta lead form submissions via Graph API webhook',
+    description: 'Connect with Facebook to ingest Meta Lead Ads form submissions',
     gradient: 'from-indigo-500 to-violet-600',
     tint: 'rgba(99,102,241,0.08)',
-    fields: [
-      { key: 'api_key', label: 'Page Access Token', placeholder: 'Meta Page Access Token', type: 'password' },
-      { key: 'page_id', label: 'Facebook Page ID', placeholder: 'e.g. 123456789', type: 'text' },
-      { key: 'app_secret', label: 'App Secret (for HMAC)', placeholder: 'Meta App Secret', type: 'password' },
-    ],
+    oauth: true,
+    fields: [],
     webhookUrl: '/api/v1/lead-sources/facebook/webhook',
-    helpText: 'Configure the webhook URL in Meta Developer Console \u2192 Webhooks \u2192 Lead Ads',
+    helpText: 'Click "Login with Facebook" below \u2014 we\'ll redirect you to Meta, you pick a Page, and we\'ll save the rest. The webhook URL above goes into Meta Developer Console \u2192 Webhooks \u2192 Lead Ads.',
   },
 ];
 
@@ -65,7 +62,7 @@ function MiniStat({ label, value }) {
   );
 }
 
-function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing }) {
+function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSaving, isSyncing, isOAuthLoading }) {
   const { can } = usePermissions();
   const canWrite = can('integrations', 'create') || can('crm', 'create');
   const [expanded, setExpanded] = useState(false);
@@ -185,6 +182,26 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
             </Field>
           )}
 
+          {source.oauth && canWrite && (
+            <Field
+              label="Connection"
+              hint={isConfigured ? `Connected to page ID ${config.page_id}` : 'Sign in with Facebook and pick a Page'}
+            >
+              <Button
+                onClick={onOAuthStart}
+                disabled={isOAuthLoading}
+                className="w-full bg-[#1877F2] hover:bg-[#0a66c2] text-white"
+                size="lg"
+              >
+                {isOAuthLoading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Redirecting…</>
+                ) : (
+                  <><Facebook className="w-4 h-4 mr-2" /> {isConfigured ? 'Reconnect with Facebook' : 'Login with Facebook'}</>
+                )}
+              </Button>
+            </Field>
+          )}
+
           {source.fields.map((field) => (
             <Field key={field.key} label={field.label}>
               <Input
@@ -232,7 +249,7 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
             <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">{source.helpText}</p>
           </div>
 
-          {canWrite && (
+          {canWrite && (source.fields.length > 0 || source.webhookUrl) && (
             <Button onClick={handleSave} disabled={isSaving} className="w-full" size="lg">
               {isSaving ? 'Saving...' : isConfigured ? 'Update Configuration' : 'Save Configuration'}
             </Button>
@@ -243,12 +260,83 @@ function SourceCard({ source, config, stats, onSave, onSync, isSaving, isSyncing
   );
 }
 
+function FacebookPagePickerModal({ pages, sessionId, onClose, onConnect, isConnecting }) {
+  const [selected, setSelected] = useState(pages?.[0]?.id || '');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+      <Card className="w-full max-w-md p-6 space-y-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Choose a Facebook Page</h2>
+            <p className="text-xs text-slate-500 mt-1">
+              We'll listen for new Lead Ad submissions on the page you pick.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {pages.map((p) => (
+            <label
+              key={p.id}
+              className={`flex items-center gap-3 px-3 py-3 rounded-xl border cursor-pointer transition-all ${
+                selected === p.id
+                  ? 'border-indigo-400 bg-indigo-50/60 dark:bg-indigo-900/20'
+                  : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+              }`}
+            >
+              <input
+                type="radio"
+                name="fb-page"
+                value={p.id}
+                checked={selected === p.id}
+                onChange={() => setSelected(p.id)}
+                className="accent-indigo-500"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm text-slate-900 dark:text-white truncate">{p.name}</div>
+                <div className="text-xs text-slate-500 truncate">
+                  {p.category || 'Page'} · ID {p.id}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 pt-2">
+          <Button variant="secondary" onClick={onClose} className="flex-1" disabled={isConnecting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => onConnect(sessionId, selected)}
+            disabled={!selected || isConnecting}
+            className="flex-1"
+          >
+            {isConnecting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</> : 'Connect Page'}
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 export default function LeadSourcesPage() {
   const [configs, setConfigs] = useState([]);
   const [stats, setStats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isOAuthLoading, setIsOAuthLoading] = useState(false);
+  const [fbPicker, setFbPicker] = useState(null); // {sessionId, pages} | null
+  const [isConnectingFb, setIsConnectingFb] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -273,6 +361,60 @@ export default function LeadSourcesPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // After redirect from /facebook/oauth/callback the SPA lands here with
+  // ?fb_session=... or ?fb_error=... in the URL — drain it into UI state.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fbSession = params.get('fb_session');
+    const fbError = params.get('fb_error');
+
+    const cleanUrl = () => {
+      params.delete('fb_session');
+      params.delete('fb_error');
+      const qs = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    };
+
+    if (fbError) {
+      toast.error(`Facebook connection failed: ${fbError.replace(/_/g, ' ')}`);
+      cleanUrl();
+      return;
+    }
+    if (fbSession) {
+      api.get(`/api/v1/lead-sources/facebook/oauth/session/${fbSession}`)
+        .then((res) => setFbPicker({ sessionId: fbSession, pages: res.data?.pages || [] }))
+        .catch(() => toast.error('OAuth session expired — please try again'))
+        .finally(cleanUrl);
+    }
+  }, []);
+
+  const handleOAuthStartFacebook = async () => {
+    setIsOAuthLoading(true);
+    try {
+      const res = await api.post('/api/v1/lead-sources/facebook/oauth/start');
+      const url = res.data?.auth_url;
+      if (!url) throw new Error('No auth_url');
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not start Facebook login');
+      setIsOAuthLoading(false);
+    }
+  };
+
+  const handleConnectFacebookPage = async (sessionId, pageId) => {
+    setIsConnectingFb(true);
+    try {
+      await api.post('/api/v1/lead-sources/facebook/oauth/connect', { session_id: sessionId, page_id: pageId });
+      toast.success('Facebook page connected!');
+      setFbPicker(null);
+      fetchData();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to connect page');
+    } finally {
+      setIsConnectingFb(false);
+    }
+  };
 
   const handleSave = async (payload) => {
     setIsSaving(true);
@@ -353,8 +495,10 @@ export default function LeadSourcesPage() {
               stats={null}
               onSave={handleSave}
               onSync={handleSync}
+              onOAuthStart={source.oauth ? handleOAuthStartFacebook : undefined}
               isSaving={isSaving}
               isSyncing={isSyncing}
+              isOAuthLoading={isOAuthLoading}
             />
           ))}
         </div>
@@ -368,11 +512,23 @@ export default function LeadSourcesPage() {
               stats={getStatsForProvider(source.provider)}
               onSave={handleSave}
               onSync={handleSync}
+              onOAuthStart={source.oauth ? handleOAuthStartFacebook : undefined}
               isSaving={isSaving}
               isSyncing={isSyncing}
+              isOAuthLoading={isOAuthLoading}
             />
           ))}
         </div>
+      )}
+
+      {fbPicker && (
+        <FacebookPagePickerModal
+          pages={fbPicker.pages}
+          sessionId={fbPicker.sessionId}
+          onClose={() => setFbPicker(null)}
+          onConnect={handleConnectFacebookPage}
+          isConnecting={isConnectingFb}
+        />
       )}
     </div>
   );

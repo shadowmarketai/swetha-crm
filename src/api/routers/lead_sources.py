@@ -457,3 +457,256 @@ def _config_to_response(config: LeadSourceConfig) -> LeadSourceConfigResponse:
         created_at=str(config.created_at) if config.created_at else None,
         updated_at=str(config.updated_at) if config.updated_at else None,
     )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Facebook Lead Ads OAuth (Login with Facebook → page picker)
+# ──────────────────────────────────────────────────────────────────
+#
+# The legacy UX asked the user to paste a Page Access Token and Page ID
+# directly. That requires admin-level FB knowledge and a token whose
+# expiry the user has to manage manually. The OAuth flow below replaces
+# that with: click "Login with Facebook" → consent → pick a page from a
+# dropdown → connection saved with a 60-day long-lived page token.
+#
+# Multi-process limitation: pending sessions live in a module-level dict
+# on this worker. A single user finishing OAuth will be routed to the
+# same worker by sticky-session or short-lived cookie in any sane
+# proxy setup; if you scale this past one worker without sticky
+# sessions, replace _OAUTH_SESSIONS with a Redis-backed store.
+
+import secrets
+import time
+from urllib.parse import urlencode
+
+import jwt as _jwt
+from fastapi import Body
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
+
+from api.dependencies import get_current_user
+
+_OAUTH_SESSION_TTL_SECONDS = 600  # 10 min — user must finish the picker quickly
+_OAUTH_SESSIONS: dict[str, dict] = {}
+
+
+def _purge_expired_oauth_sessions() -> None:
+    now = time.time()
+    expired = [sid for sid, s in _OAUTH_SESSIONS.items() if s["expires_at"] < now]
+    for sid in expired:
+        _OAUTH_SESSIONS.pop(sid, None)
+
+
+def _meta_oauth_required() -> None:
+    if not (settings.META_APP_ID and settings.META_APP_SECRET):
+        raise HTTPException(
+            status_code=503,
+            detail="Facebook OAuth not configured. Set META_APP_ID and META_APP_SECRET.",
+        )
+
+
+@router.post("/facebook/oauth/start")
+async def facebook_oauth_start(
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Begin the FB Login flow. Returns an `auth_url` the SPA opens in the
+    browser. The signed `state` carries the user_id so the public callback
+    can verify which user the consent belongs to.
+    """
+    _meta_oauth_required()
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    state_payload = {
+        "user_id": user_id,
+        "nonce": secrets.token_urlsafe(16),
+        "exp": int(time.time()) + _OAUTH_SESSION_TTL_SECONDS,
+    }
+    state = _jwt.encode(state_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    scopes = [
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_metadata",
+        "leads_retrieval",
+    ]
+    params = {
+        "client_id": settings.META_APP_ID,
+        "redirect_uri": settings.META_OAUTH_REDIRECT_URI,
+        "state": state,
+        "response_type": "code",
+        "scope": ",".join(scopes),
+    }
+    auth_url = f"https://www.facebook.com/{settings.META_GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
+    return {"auth_url": auth_url}
+
+
+@router.get("/facebook/oauth/callback")
+async def facebook_oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    error_reason: Optional[str] = Query(None),
+):
+    """
+    Public OAuth callback. Verifies state, exchanges code for a long-lived
+    user token, fetches pages, stores them in an OAuth session, and redirects
+    the user back to the SPA with `?fb_session=<id>` so the picker can render.
+    """
+    _meta_oauth_required()
+    spa_target = "/crm/lead-sources"
+
+    if error:
+        return RedirectResponse(
+            url=f"{spa_target}?fb_error={error_reason or error}",
+            status_code=302,
+        )
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state")
+
+    try:
+        decoded = _jwt.decode(state, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except _jwt.PyJWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+    user_id = decoded["user_id"]
+    graph = f"https://graph.facebook.com/{settings.META_GRAPH_API_VERSION}"
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        # 1. Short-lived user token
+        r = await client.get(
+            f"{graph}/oauth/access_token",
+            params={
+                "client_id": settings.META_APP_ID,
+                "client_secret": settings.META_APP_SECRET,
+                "redirect_uri": settings.META_OAUTH_REDIRECT_URI,
+                "code": code,
+            },
+        )
+        if r.status_code != 200:
+            return RedirectResponse(url=f"{spa_target}?fb_error=token_exchange_failed", status_code=302)
+        short_user_token = r.json().get("access_token")
+
+        # 2. Long-lived user token (~60 days)
+        r = await client.get(
+            f"{graph}/oauth/access_token",
+            params={
+                "grant_type": "fb_exchange_token",
+                "client_id": settings.META_APP_ID,
+                "client_secret": settings.META_APP_SECRET,
+                "fb_exchange_token": short_user_token,
+            },
+        )
+        if r.status_code != 200:
+            return RedirectResponse(url=f"{spa_target}?fb_error=long_token_failed", status_code=302)
+        long_user_token = r.json().get("access_token")
+
+        # 3. List pages — each entry has a per-page access_token already
+        # long-lived because it was issued from a long-lived user token.
+        r = await client.get(
+            f"{graph}/me/accounts",
+            params={"access_token": long_user_token, "fields": "id,name,access_token,category"},
+        )
+        if r.status_code != 200:
+            return RedirectResponse(url=f"{spa_target}?fb_error=pages_fetch_failed", status_code=302)
+        pages = r.json().get("data", []) or []
+
+    if not pages:
+        return RedirectResponse(url=f"{spa_target}?fb_error=no_pages_found", status_code=302)
+
+    _purge_expired_oauth_sessions()
+    session_id = secrets.token_urlsafe(24)
+    _OAUTH_SESSIONS[session_id] = {
+        "user_id": user_id,
+        "pages": pages,  # holds page tokens — never returned to client wholesale
+        "user_token": long_user_token,
+        "expires_at": time.time() + _OAUTH_SESSION_TTL_SECONDS,
+    }
+    return RedirectResponse(url=f"{spa_target}?fb_session={session_id}", status_code=302)
+
+
+@router.get("/facebook/oauth/session/{session_id}")
+async def facebook_oauth_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the picker-safe page list for a pending OAuth session."""
+    _purge_expired_oauth_sessions()
+    sess = _OAUTH_SESSIONS.get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="OAuth session expired or not found")
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    if sess["user_id"] != user_id:
+        # Don't disclose existence to a different user
+        raise HTTPException(status_code=404, detail="OAuth session expired or not found")
+
+    return {
+        "session_id": session_id,
+        "pages": [
+            {"id": p["id"], "name": p["name"], "category": p.get("category")}
+            for p in sess["pages"]
+        ],
+    }
+
+
+class _FacebookConnectBody(BaseModel):
+    session_id: str
+    page_id: str
+
+
+@router.post("/facebook/oauth/connect", response_model=LeadSourceConfigResponse)
+async def facebook_oauth_connect(
+    payload: _FacebookConnectBody = Body(...),
+    current_user: dict = Depends(require_permission("integrations", "create")),
+    db: Session = Depends(get_db),
+):
+    """
+    Finish OAuth: persist the chosen page as a LeadSourceConfig with its
+    long-lived page token, then delete the OAuth session.
+    """
+    _purge_expired_oauth_sessions()
+    sess = _OAUTH_SESSIONS.get(payload.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="OAuth session expired or not found")
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    if sess["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="OAuth session expired or not found")
+
+    page = next((p for p in sess["pages"] if p["id"] == payload.page_id), None)
+    if not page:
+        raise HTTPException(status_code=400, detail="Page not in this OAuth session")
+
+    # Upsert: replace any existing facebook_leads config for this user.
+    existing = db.execute(
+        select(LeadSourceConfig).where(
+            and_(
+                LeadSourceConfig.user_id == user_id,
+                LeadSourceConfig.provider == LeadSourceProvider.FACEBOOK_LEADS,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.api_key = page["access_token"]
+        existing.app_secret = settings.META_APP_SECRET
+        existing.page_id = page["id"]
+        existing.is_active = True
+        config = existing
+    else:
+        config = LeadSourceConfig(
+            user_id=user_id,
+            provider=LeadSourceProvider.FACEBOOK_LEADS,
+            api_key=page["access_token"],
+            app_secret=settings.META_APP_SECRET,
+            page_id=page["id"],
+            is_active=True,
+        )
+        db.add(config)
+
+    db.commit()
+    db.refresh(config)
+    _OAUTH_SESSIONS.pop(payload.session_id, None)
+    logger.info("Facebook page connected via OAuth: user=%s page=%s", user_id, page["id"])
+    return _config_to_response(config)

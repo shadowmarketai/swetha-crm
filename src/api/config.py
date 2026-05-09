@@ -63,6 +63,17 @@ class Settings(BaseSettings):
     INDIAMART_CRM_API_URL: str = "https://mapi.indiamart.com/wservce/crm/crmListing/v2/"
     JUSTDIAL_WEBHOOK_SECRET: str = ""
 
+    # ── Meta / Facebook Lead Ads OAuth ─────────────────────────
+    # Create the app at developers.facebook.com → Lead Ads product.
+    # Add the OAuth callback URL (META_OAUTH_REDIRECT_URI) to "Valid OAuth
+    # Redirect URIs" inside Facebook Login → Settings.
+    META_APP_ID: str = ""
+    META_APP_SECRET: str = ""
+    META_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/v1/lead-sources/facebook/oauth/callback"
+    META_GRAPH_API_VERSION: str = "v18.0"
+    # Webhook hub.verify_token used by /facebook/webhook GET handshake.
+    META_WEBHOOK_VERIFY_TOKEN: str = ""
+
     # ── Messaging ────────────────────────────────────────────────
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
