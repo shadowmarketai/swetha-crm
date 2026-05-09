@@ -93,9 +93,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Celery Worker for async tasks
-  # NOT-YET-WIRED: src/api/tasks.py does not exist in this repo. Bring up
-  # behind the `workers` profile only after the tasks module is implemented:
+  # Celery Worker for async tasks (src/api/tasks.py)
   #     docker compose --profile workers up
   celery-worker:
     profiles: ["workers"]
@@ -128,8 +126,7 @@ services:
       start_period: 30s
       retries: 3
 
-  # Celery Beat for scheduled tasks
-  # NOT-YET-WIRED: needs src/api/tasks.py — see celery-worker comment above.
+  # Celery Beat for scheduled tasks (currently: nightly render cleanup)
   celery-beat:
     profiles: ["workers"]
     build:

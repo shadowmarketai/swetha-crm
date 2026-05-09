@@ -73,6 +73,20 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
     )
 
+    # ── ProxyHeadersMiddleware (must run FIRST — outermost wrapper) ──
+    # Behind a reverse proxy (Nginx, Caddy, Coolify Traefik), the request's
+    # client.host is the proxy's loopback address. Without this middleware
+    # the rate limiter and audit logs see one shared IP for every request,
+    # making tenant-level rate limiting useless and IP-based abuse tracking
+    # impossible. Configure trusted upstream IPs via FORWARDED_ALLOW_IPS env
+    # (comma-separated). Default '127.0.0.1,::1' covers same-host proxies.
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    _trusted = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,::1")
+    application.add_middleware(
+        ProxyHeadersMiddleware,
+        trusted_hosts=[h.strip() for h in _trusted.split(",") if h.strip()],
+    )
+
     # ── Exception Handlers ───────────────────────────────────
     register_exception_handlers(application)
 
@@ -279,11 +293,22 @@ def _register_lifecycle(application: FastAPI) -> None:
 
         # Start the quotation render background worker (auto-generates
         # 3D / drawings / AI renders for new client intakes).
-        try:
-            from api.services.quotation_render_worker import start_worker
-            start_worker()
-        except Exception as exc:
-            logger.warning("Quotation render worker not started: %s", exc)
+        #
+        # Multi-worker safety: this thread polls the same DB table every
+        # 10 seconds, so running it in N uvicorn workers causes N× duplicate
+        # work and race conditions on quote.render_3d_url assignment. Gate
+        # it behind RUN_BG_WORKER (default "1" so single-worker dev is
+        # unchanged). For multi-worker production, set RUN_BG_WORKER=0 in
+        # the API container and run a separate single-worker container with
+        # RUN_BG_WORKER=1 dedicated to background processing.
+        if os.environ.get("RUN_BG_WORKER", "1") == "1":
+            try:
+                from api.services.quotation_render_worker import start_worker
+                start_worker()
+            except Exception as exc:
+                logger.warning("Quotation render worker not started: %s", exc)
+        else:
+            logger.info("RUN_BG_WORKER=0 — render worker thread skipped in this process")
 
         # Voice AI is now a separate service (voice-flow).
         # CRM integrates via API at VOICEFLOW_API_URL.

@@ -28,57 +28,161 @@ logger = logging.getLogger(__name__)
 # passlib 1.7.4 + bcrypt 4.0.1 are compatible; pin bcrypt<4.1 in requirements
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# ── Token Blacklist (in-memory, cleared on restart) ─────────────
-# In production with multiple workers, replace with Redis SET.
-_revoked_jtis: set[str] = set()
+# ── Auth state store (multi-worker safe) ──────────────────────────
+#
+# Token revocations and brute-force counters need to outlive process restarts
+# AND be visible to every uvicorn worker. The store is backed by Redis when
+# REDIS_URL is reachable; otherwise it falls back to in-memory structures so
+# dev and tests still work without infrastructure.
+#
+# This module-level object is the single state surface — the rest of the file
+# (revoke_token, is_token_revoked, _check_lockout, etc.) delegates to it.
+
+_MAX_FAILED_ATTEMPTS = 5      # OWASP recommends 5; dropped from 10
+_LOCKOUT_SECONDS = 900        # 15 minutes; bumped from 5
+_REVOKE_TTL_SECONDS = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+
+
+class _InMemoryAuthState:
+    """Fallback when Redis isn't reachable. NOT multi-worker safe."""
+
+    def __init__(self) -> None:
+        self._revoked: set[str] = set()
+        self._failed: dict[str, dict] = {}
+
+    def revoke_jti(self, jti: str) -> None:
+        self._revoked.add(jti)
+
+    def is_jti_revoked(self, jti: str) -> bool:
+        return jti in self._revoked
+
+    def get_lockout_remaining(self, email: str) -> int:
+        rec = self._failed.get(email)
+        if not rec:
+            return 0
+        until = rec.get("locked_until")
+        if not until:
+            return 0
+        remaining = int((until - datetime.now(timezone.utc)).total_seconds())
+        if remaining <= 0:
+            self._failed.pop(email, None)
+            return 0
+        return remaining
+
+    def record_failed(self, email: str) -> int:
+        rec = self._failed.setdefault(email, {"count": 0, "locked_until": None})
+        rec["count"] += 1
+        if rec["count"] >= _MAX_FAILED_ATTEMPTS:
+            rec["locked_until"] = datetime.now(timezone.utc) + timedelta(seconds=_LOCKOUT_SECONDS)
+        return rec["count"]
+
+    def clear_failed(self, email: str) -> None:
+        self._failed.pop(email, None)
+
+
+class _RedisAuthState:
+    """Production-grade auth state. Each worker instantiates its own client."""
+
+    def __init__(self, redis_client) -> None:
+        self._r = redis_client
+
+    @staticmethod
+    def _revoke_key(jti: str) -> str:
+        return f"auth:revoked:{jti}"
+
+    @staticmethod
+    def _failed_key(email: str) -> str:
+        return f"auth:failed:{email.lower()}"
+
+    @staticmethod
+    def _lockout_key(email: str) -> str:
+        return f"auth:lockout:{email.lower()}"
+
+    def revoke_jti(self, jti: str) -> None:
+        # SETEX with the access token TTL — the entry naturally expires when
+        # the token would have expired anyway, so the keyspace doesn't grow.
+        self._r.setex(self._revoke_key(jti), _REVOKE_TTL_SECONDS, "1")
+
+    def is_jti_revoked(self, jti: str) -> bool:
+        return bool(self._r.exists(self._revoke_key(jti)))
+
+    def get_lockout_remaining(self, email: str) -> int:
+        ttl = self._r.ttl(self._lockout_key(email))
+        # ttl returns -2 for missing key, -1 for key without TTL
+        return ttl if ttl and ttl > 0 else 0
+
+    def record_failed(self, email: str) -> int:
+        key = self._failed_key(email)
+        # INCR returns the new count atomically across workers
+        count = self._r.incr(key)
+        if count == 1:
+            # First failure in this window — set TTL so the counter resets
+            self._r.expire(key, _LOCKOUT_SECONDS)
+        if count >= _MAX_FAILED_ATTEMPTS:
+            # Set the lockout flag with TTL = lockout duration
+            self._r.setex(self._lockout_key(email), _LOCKOUT_SECONDS, "1")
+        return int(count)
+
+    def clear_failed(self, email: str) -> None:
+        self._r.delete(self._failed_key(email), self._lockout_key(email))
+
+
+def _build_auth_state():
+    """
+    Try Redis first; fall back to in-memory if unavailable. Connection is
+    tested with a PING — silent failure here would mean state is local to
+    one worker (security degradation), so we want a clear log line.
+    """
+    redis_url = (getattr(settings, "REDIS_URL", "") or "").strip()
+    if redis_url:
+        try:
+            import redis  # type: ignore
+            client = redis.from_url(redis_url, socket_connect_timeout=2, decode_responses=True)
+            client.ping()
+            logger.info("Auth state backend: Redis (%s)", redis_url)
+            return _RedisAuthState(client)
+        except Exception as exc:
+            logger.warning(
+                "Auth state backend: in-memory fallback (Redis unreachable: %s). "
+                "This is NOT multi-worker safe; do not run --workers > 1 in production.",
+                exc,
+            )
+    else:
+        logger.info("Auth state backend: in-memory (REDIS_URL not configured)")
+    return _InMemoryAuthState()
+
+
+_state = _build_auth_state()
 
 
 def revoke_token(jti: str) -> None:
-    """Add a token's jti to the blacklist."""
-    _revoked_jtis.add(jti)
+    """Mark a token's jti as revoked. Persists across worker restart via Redis."""
+    _state.revoke_jti(jti)
 
 
 def is_token_revoked(jti: str) -> bool:
-    """Check if a token has been revoked."""
-    return jti in _revoked_jtis
-
-
-# ── Account Lockout (in-memory, cleared on restart) ─────────────
-# In production with multiple workers, replace with Redis HASH.
-_MAX_FAILED_ATTEMPTS = 10
-_LOCKOUT_SECONDS = 300  # 5 minutes
-
-_failed_logins: dict[str, dict] = {}  # email -> {"count": int, "locked_until": datetime}
+    return _state.is_jti_revoked(jti)
 
 
 def _check_lockout(email: str) -> None:
-    """Raise UnauthorizedError if account is locked."""
-    record = _failed_logins.get(email)
-    if not record:
-        return
-    locked_until = record.get("locked_until")
-    if locked_until and datetime.now(timezone.utc) < locked_until:
-        remaining = int((locked_until - datetime.now(timezone.utc)).total_seconds())
+    """Raise UnauthorizedError if the account is locked out."""
+    remaining = _state.get_lockout_remaining(email)
+    if remaining > 0:
         raise UnauthorizedError(
             detail=f"Account temporarily locked. Try again in {remaining} seconds."
         )
-    # Lock expired — reset
-    if locked_until and datetime.now(timezone.utc) >= locked_until:
-        _failed_logins.pop(email, None)
 
 
 def _record_failed_login(email: str) -> None:
-    """Record a failed login attempt. Lock account after too many failures."""
-    record = _failed_logins.setdefault(email, {"count": 0, "locked_until": None})
-    record["count"] += 1
-    if record["count"] >= _MAX_FAILED_ATTEMPTS:
-        record["locked_until"] = datetime.now(timezone.utc) + timedelta(seconds=_LOCKOUT_SECONDS)
-        logger.warning("Account locked for %s after %d failed attempts", email, record["count"])
+    """Record a failed login. Locks the account at _MAX_FAILED_ATTEMPTS."""
+    count = _state.record_failed(email)
+    if count >= _MAX_FAILED_ATTEMPTS:
+        logger.warning("Account locked for %s after %d failed attempts", email, count)
 
 
 def _clear_failed_logins(email: str) -> None:
-    """Clear failed login counter on successful login."""
-    _failed_logins.pop(email, None)
+    """Clear failed-login state on successful login."""
+    _state.clear_failed(email)
 
 
 class AuthService:

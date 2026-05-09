@@ -60,16 +60,59 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Limits scale by user plan: starter(60rpm), pro(300rpm), enterprise(1000rpm).
     Auth endpoints always get stricter limits.
     Disabled in development unless FORCE_RATE_LIMIT=1.
+
+    Storage:
+      - Redis when REDIS_URL is configured (multi-worker safe via INCR/EXPIRE)
+      - In-memory dict fallback (single worker only)
     """
 
     def __init__(self, app):
         super().__init__(app)
-        # {key: (count, window_start)}
+        # In-memory fallback when Redis isn't available
         self._buckets: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, 0.0))
         self.enabled = APP_ENV not in ("development", "testing") or os.environ.get("FORCE_RATE_LIMIT") == "1"
 
+        # Try to connect to Redis; fall back to in-memory if unreachable.
+        # Each uvicorn worker gets its own Redis client, but they share the
+        # same keyspace so counters are coherent across workers.
+        self._redis = None
+        redis_url = os.environ.get("REDIS_URL", "").strip()
+        if self.enabled and redis_url:
+            try:
+                import redis  # type: ignore
+                client = redis.from_url(redis_url, socket_connect_timeout=2, decode_responses=True)
+                client.ping()
+                self._redis = client
+                logger.info("Rate limiter backend: Redis (%s)", redis_url)
+            except Exception as exc:
+                logger.warning(
+                    "Rate limiter backend: in-memory fallback (Redis unreachable: %s). "
+                    "Counters will NOT sync across workers.",
+                    exc,
+                )
+
     def _check_limit(self, key: str, rpm: int) -> bool:
-        """Returns True if request is allowed."""
+        """Returns True if the request is allowed under `key`'s rpm budget."""
+        if self._redis is not None:
+            return self._check_limit_redis(key, rpm)
+        return self._check_limit_memory(key, rpm)
+
+    def _check_limit_redis(self, key: str, rpm: int) -> bool:
+        """Atomic INCR + EXPIRE — safe across N uvicorn workers."""
+        try:
+            count = self._redis.incr(f"rl:{key}")
+            if count == 1:
+                # First hit in this minute — set the TTL so the counter
+                # auto-resets without a separate cleanup job.
+                self._redis.expire(f"rl:{key}", 60)
+            return int(count) <= rpm
+        except Exception as exc:
+            # Don't fail the request if Redis hiccups — degrade open.
+            logger.warning("Rate limiter Redis call failed (%s); allowing request", exc)
+            return True
+
+    def _check_limit_memory(self, key: str, rpm: int) -> bool:
+        """Single-worker fallback (the original token-bucket impl)."""
         now = time.time()
         count, window_start = self._buckets[key]
         if now - window_start > 60:
