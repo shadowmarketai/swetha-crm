@@ -26,10 +26,12 @@ class LeadStatus(str, Enum):
 
 class DealStage(str, Enum):
     DISCOVERY = "discovery"
+    QUALIFICATION = "qualification"
     PROPOSAL = "proposal"
     NEGOTIATION = "negotiation"
     CLOSED_WON = "closed_won"
     CLOSED_LOST = "closed_lost"
+    ON_HOLD = "on_hold"
 
 
 class ActivityType(str, Enum):
@@ -56,6 +58,7 @@ class LeadCreate(BaseModel):
     status: LeadStatus = LeadStatus.NEW
     lead_score: float = Field(default=0.0, ge=0.0, le=100.0)
     notes: Optional[str] = Field(default=None, max_length=5000)
+    company_id: Optional[int] = None
     assigned_to: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     utm_source: Optional[str] = None
@@ -85,6 +88,7 @@ class LeadUpdate(BaseModel):
     status: Optional[LeadStatus] = None
     lead_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
     notes: Optional[str] = Field(default=None, max_length=5000)
+    company_id: Optional[int] = None
     assigned_to: Optional[str] = None
     tags: Optional[list[str]] = None
     utm_source: Optional[str] = None
@@ -103,6 +107,7 @@ class LeadResponse(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     company: Optional[str] = None
+    company_id: Optional[str] = None
     source: Optional[str] = None
     status: Optional[str] = None
     lead_score: float = 0.0
@@ -309,6 +314,22 @@ class ActivityCreate(BaseModel):
 
     activity_type: ActivityType
     subject: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=5000)
+    lead_id: Optional[str] = None
+    contact_id: Optional[str] = None
+    deal_id: Optional[str] = None
+    due_date: Optional[str] = None
+    duration_minutes: Optional[int] = Field(default=None, ge=0)
+    outcome: Optional[str] = Field(default=None, max_length=200)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ActivityUpdate(BaseModel):
+    """Update an existing activity (partial update)."""
+
+    activity_type: Optional[ActivityType] = None
+    subject: Optional[str] = Field(default=None, min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, max_length=5000)
     lead_id: Optional[str] = None
     contact_id: Optional[str] = None

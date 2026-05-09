@@ -68,6 +68,7 @@ def _lead_to_dict(lead: Lead) -> dict[str, Any]:
         "phone": lead.phone,
         "email": lead.email,
         "company": lead.company_name,
+        "company_id": str(lead.company_id) if lead.company_id else None,
         "source": _serialize_enum(lead.source),
         "status": _serialize_enum(lead.status),
         "lead_score": lead.lead_score or 0.0,
@@ -289,6 +290,7 @@ def create_lead(db: Session, user_id: str, data: dict[str, Any]) -> dict[str, An
         phone=data.get("phone"),
         email=data.get("email"),
         company_name=data.get("company"),
+        company_id=int(data["company_id"]) if data.get("company_id") else None,
         source=source_val,
         status=status_val,
         lead_score=data.get("lead_score", 0.0),
@@ -340,6 +342,13 @@ def update_lead(db: Session, user_id: str, lead_id: int, data: dict[str, Any]) -
     # Handle tags
     if "tags" in data and data["tags"] is not None:
         lead.tags = data["tags"]
+
+    # Handle company_id
+    if "company_id" in data:
+        if data["company_id"] is not None:
+            lead.company_id = int(data["company_id"])
+        else:
+            lead.company_id = None
 
     # Handle assigned_to
     if "assigned_to" in data:
@@ -696,6 +705,22 @@ def update_contact(
     return _contact_to_dict(contact)
 
 
+def delete_contact(db: Session, user_id: str, contact_id: int) -> bool:
+    """Soft-delete a contact."""
+    contact = (
+        db.query(Contact)
+        .filter(Contact.id == contact_id, Contact.user_id == user_id)
+        .first()
+    )
+    if not contact:
+        return False
+    contact.is_deleted = True
+    contact.deleted_at = datetime.utcnow()
+    db.commit()
+    logger.info("Contact soft-deleted: id=%s, user=%s", contact.id, user_id)
+    return True
+
+
 # =====================================================================
 # DEAL CRUD
 # =====================================================================
@@ -881,6 +906,22 @@ def update_deal(db: Session, user_id: str, deal_id: int, data: dict[str, Any]) -
     return _deal_to_dict(deal)
 
 
+def delete_deal(db: Session, user_id: str, deal_id: int) -> bool:
+    """Soft-delete a deal."""
+    deal = (
+        db.query(Deal)
+        .filter(Deal.id == deal_id, Deal.user_id == user_id)
+        .first()
+    )
+    if not deal:
+        return False
+    deal.is_deleted = True
+    deal.deleted_at = datetime.utcnow()
+    db.commit()
+    logger.info("Deal soft-deleted: id=%s, user=%s", deal.id, user_id)
+    return True
+
+
 # =====================================================================
 # ACTIVITY CRUD
 # =====================================================================
@@ -955,6 +996,69 @@ def create_activity(db: Session, user_id: str, data: dict[str, Any]) -> dict[str
     db.refresh(activity)
     logger.info("Activity created: id=%s, type=%s, user=%s", activity.id, type_val.value, user_id)
     return _activity_to_dict(activity)
+
+
+def get_activity_by_id(db: Session, user_id: str, activity_id: int) -> Optional[dict[str, Any]]:
+    """Get a single activity by ID."""
+    activity = (
+        db.query(Activity)
+        .filter(Activity.id == activity_id, Activity.user_id == user_id)
+        .first()
+    )
+    if not activity:
+        return None
+    return _activity_to_dict(activity)
+
+
+def update_activity(db: Session, user_id: str, activity_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Update an existing activity (partial update)."""
+    activity = (
+        db.query(Activity)
+        .filter(Activity.id == activity_id, Activity.user_id == user_id)
+        .first()
+    )
+    if not activity:
+        return None
+
+    simple_fields = ["subject", "description", "call_outcome", "duration_minutes"]
+    for field in simple_fields:
+        if field in data and data[field] is not None:
+            setattr(activity, field, data[field])
+
+    if "status" in data and data["status"] is not None:
+        activity.status = data["status"]
+
+    if "due_date" in data and data["due_date"] is not None:
+        try:
+            activity.scheduled_at = datetime.fromisoformat(data["due_date"])
+        except (ValueError, TypeError):
+            pass
+
+    if "completed" in data:
+        if data["completed"]:
+            activity.completed_at = datetime.utcnow()
+        else:
+            activity.completed_at = None
+
+    db.commit()
+    db.refresh(activity)
+    logger.info("Activity updated: id=%s, user=%s", activity.id, user_id)
+    return _activity_to_dict(activity)
+
+
+def delete_activity(db: Session, user_id: str, activity_id: int) -> bool:
+    """Delete an activity (hard delete since activities are log entries)."""
+    activity = (
+        db.query(Activity)
+        .filter(Activity.id == activity_id, Activity.user_id == user_id)
+        .first()
+    )
+    if not activity:
+        return False
+    db.delete(activity)
+    db.commit()
+    logger.info("Activity deleted: id=%s, user=%s", activity_id, user_id)
+    return True
 
 
 # =====================================================================

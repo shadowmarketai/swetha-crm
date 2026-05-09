@@ -10,10 +10,12 @@ API prefix: /api/v1
 Tags: CRM
 """
 
+import csv
+import io
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -22,6 +24,7 @@ from api.schemas.common import MessageResponse, PaginatedResponse
 from api.schemas.crm import (
     ActivityCreate,
     ActivityResponse,
+    ActivityUpdate,
     CompanyCreate,
     CompanyResponse,
     CompanyUpdate,
@@ -188,6 +191,92 @@ async def delete_lead(
     from api.broadcast import broadcast_event
     await broadcast_event("lead.deleted", {"id": lead_id})
     return MessageResponse(message="Lead deleted successfully", success=True)
+
+
+@router.post(
+    "/crm-leads/import",
+    summary="Import leads from CSV file",
+)
+async def import_leads_csv(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_permission("crm", "create")),
+    db: Session = Depends(get_db),
+):
+    """Import leads from a CSV file. Expected columns: Name, Email, Phone, Company, Source."""
+    MAX_BYTES = 5 * 1024 * 1024
+    MAX_ROWS = 5000
+    ALLOWED_MIME = {"text/csv", "application/vnd.ms-excel", "application/csv", "text/plain"}
+
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files are accepted")
+    if file.content_type and file.content_type not in ALLOWED_MIME:
+        raise HTTPException(status_code=400, detail=f"Unsupported MIME type: {file.content_type}")
+
+    session = _get_orm_db(db)
+    user_id = _get_user_id(current_user)
+
+    content = await file.read()
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="CSV file exceeds 5 MB limit")
+
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded")
+
+    reader = csv.DictReader(io.StringIO(text))
+
+    imported = 0
+    skipped = 0
+    errors = []
+
+    for i, row in enumerate(reader, start=2):
+        if i - 1 > MAX_ROWS:
+            errors.append(f"Row {i}: row limit ({MAX_ROWS}) exceeded — remaining rows ignored")
+            break
+
+        # Normalize column names to lowercase
+        row = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
+
+        name = row.get("name", "")
+        if not name:
+            skipped += 1
+            continue
+
+        name_parts = name.split(None, 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else None
+
+        phone = row.get("phone", "") or row.get("mobile", "")
+        if not phone:
+            errors.append(f"Row {i}: missing phone/mobile")
+            skipped += 1
+            continue
+
+        data = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "phone": phone,
+            "email": row.get("email") or None,
+            "company": row.get("company") or row.get("company_name") or None,
+            "source": row.get("source") or "CSV Import",
+            "status": "new",
+            "tags": ["csv-import"],
+        }
+        try:
+            crm_service.create_lead(db=session, user_id=user_id, data=data)
+            imported += 1
+        except Exception as exc:
+            errors.append(f"Row {i}: {str(exc)[:80]}")
+            skipped += 1
+
+    logger.info("CSV import: %d imported, %d skipped, user=%s", imported, skipped, user_id)
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors[:10],
+        "count": imported,
+    }
 
 
 # =====================================================================
@@ -393,6 +482,27 @@ async def update_contact(
     return ContactResponse(**result)
 
 
+@router.delete(
+    "/crm-contacts/{contact_id}",
+    response_model=MessageResponse,
+    summary="Delete a contact",
+)
+async def delete_contact(
+    contact_id: int,
+    current_user: dict = Depends(require_permission("crm", "delete")),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete a contact."""
+    session = _get_orm_db(db)
+    user_id = _get_user_id(current_user)
+    success = crm_service.delete_contact(db=session, user_id=user_id, contact_id=contact_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("contact.deleted", {"id": contact_id})
+    return MessageResponse(message="Contact deleted successfully", success=True)
+
+
 # =====================================================================
 # DEALS
 # =====================================================================
@@ -484,6 +594,27 @@ async def update_deal(
     return DealResponse(**result)
 
 
+@router.delete(
+    "/crm-deals/{deal_id}",
+    response_model=MessageResponse,
+    summary="Delete a deal",
+)
+async def delete_deal(
+    deal_id: int,
+    current_user: dict = Depends(require_permission("crm", "delete")),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete a deal."""
+    session = _get_orm_db(db)
+    user_id = _get_user_id(current_user)
+    success = crm_service.delete_deal(db=session, user_id=user_id, deal_id=deal_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("deal.deleted", {"id": deal_id})
+    return MessageResponse(message="Deal deleted successfully", success=True)
+
+
 # =====================================================================
 # ACTIVITIES
 # =====================================================================
@@ -540,6 +671,73 @@ async def create_activity(
     from api.broadcast import broadcast_event
     await broadcast_event("activity.created", result)
     return ActivityResponse(**result)
+
+
+@router.get(
+    "/crm-activities/{activity_id}",
+    response_model=ActivityResponse,
+    summary="Get activity detail",
+)
+async def get_activity(
+    activity_id: int,
+    current_user: dict = Depends(require_permission("crm", "read")),
+    db: Session = Depends(get_db),
+):
+    """Get a single activity by ID."""
+    session = _get_orm_db(db)
+    user_id = _get_user_id(current_user)
+    result = crm_service.get_activity_by_id(db=session, user_id=user_id, activity_id=activity_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    return ActivityResponse(**result)
+
+
+@router.put(
+    "/crm-activities/{activity_id}",
+    response_model=ActivityResponse,
+    summary="Update an activity",
+)
+async def update_activity(
+    activity_id: int,
+    body: ActivityUpdate,
+    current_user: dict = Depends(require_permission("crm", "update")),
+    db: Session = Depends(get_db),
+):
+    """Update an existing activity (partial update)."""
+    session = _get_orm_db(db)
+    user_id = _get_user_id(current_user)
+    result = crm_service.update_activity(
+        db=session,
+        user_id=user_id,
+        activity_id=activity_id,
+        data=body.model_dump(exclude_unset=True),
+    )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("activity.updated", result)
+    return ActivityResponse(**result)
+
+
+@router.delete(
+    "/crm-activities/{activity_id}",
+    response_model=MessageResponse,
+    summary="Delete an activity",
+)
+async def delete_activity(
+    activity_id: int,
+    current_user: dict = Depends(require_permission("crm", "delete")),
+    db: Session = Depends(get_db),
+):
+    """Delete an activity."""
+    session = _get_orm_db(db)
+    user_id = _get_user_id(current_user)
+    success = crm_service.delete_activity(db=session, user_id=user_id, activity_id=activity_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    from api.broadcast import broadcast_event
+    await broadcast_event("activity.deleted", {"id": activity_id})
+    return MessageResponse(message="Activity deleted successfully", success=True)
 
 
 # =====================================================================
