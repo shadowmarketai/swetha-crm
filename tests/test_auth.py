@@ -154,8 +154,8 @@ class TestLogin:
     async def test_login_success_admin(self, async_client):
         """Login with seeded admin credentials should return tokens."""
         resp = await async_client.post("/api/v1/auth/login", json={
-            "email": "admin@shadowmarket.ai",
-            "password": "admin123",
+            "email": "admin@swetha.in",
+            "password": "Swetha123!",
         })
         assert resp.status_code == 200, f"Login failed: {resp.text}"
         data = resp.json()
@@ -169,18 +169,18 @@ class TestLogin:
     async def test_login_success_has_user_info(self, async_client):
         """Login response should include user email and role."""
         resp = await async_client.post("/api/v1/auth/login", json={
-            "email": "admin@shadowmarket.ai",
-            "password": "admin123",
+            "email": "admin@swetha.in",
+            "password": "Swetha123!",
         })
         if resp.status_code != 200:
             pytest.skip("Login failed")
         user = resp.json().get("user", {})
-        assert user.get("email") == "admin@shadowmarket.ai"
+        assert user.get("email") == "admin@swetha.in"
 
     async def test_login_wrong_password(self, async_client):
         """Login with wrong password should return 401."""
         resp = await async_client.post("/api/v1/auth/login", json={
-            "email": "admin@shadowmarket.ai",
+            "email": "admin@swetha.in",
             "password": "wrong-password-123",
         })
         assert resp.status_code == 401
@@ -196,14 +196,14 @@ class TestLogin:
     async def test_login_missing_email(self, async_client):
         """Login without email should return 422."""
         resp = await async_client.post("/api/v1/auth/login", json={
-            "password": "admin123",
+            "password": "Swetha123!",
         })
         assert resp.status_code == 422
 
     async def test_login_missing_password(self, async_client):
         """Login without password should return 422."""
         resp = await async_client.post("/api/v1/auth/login", json={
-            "email": "admin@shadowmarket.ai",
+            "email": "admin@swetha.in",
         })
         assert resp.status_code == 422
 

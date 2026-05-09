@@ -22,13 +22,9 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
-# All CRM tests require ORM tables but the legacy auth_service creates
-# incompatible raw SQL tables first. Mark entire module as xfail until
-# auth_service is migrated to ORM.
-pytestmark = pytest.mark.xfail(
-    reason="ORM/legacy schema conflict: legacy tables lack user_id, first_name columns",
-    strict=False,
-)
+# Previously module-level xfail due to a legacy/ORM schema conflict that
+# has since been resolved. As of 2026-05-09 the full CRM test suite (37
+# tests) runs green, so the marker has been removed.
 
 
 # ===========================================================================

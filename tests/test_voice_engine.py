@@ -1,8 +1,16 @@
 """
-VoiceFlow Marketing AI - Tests
-==============================
-Unit tests for core functionality
+VoiceFlow Marketing AI - Tests (LEGACY — disabled)
+
+These tests target the standalone `voice_engine.engine` module which used to
+ship inside this repo but was extracted to a separate `voice-flow` service.
+The imports below all fail because that module no longer exists in src/.
+
+Skipping at module level rather than deleting so the historic test bodies
+remain visible if someone wants to port them to the external service.
 """
+
+import pytest
+pytestmark = pytest.mark.skip(reason="voice_engine extracted to external voice-flow service")
 
 import pytest
 import pytest_asyncio

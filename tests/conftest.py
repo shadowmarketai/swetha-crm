@@ -136,8 +136,8 @@ async def auth_headers(client):
     algorithm changes or the admin user was not seeded).
     """
     resp = await client.post("/api/v1/auth/login", json={
-        "email": "admin@shadowmarket.ai",
-        "password": "admin123",
+        "email": "admin@swetha.in",
+        "password": "Swetha123!",
     })
     if resp.status_code == 200:
         data = resp.json()
@@ -152,8 +152,8 @@ async def auth_headers(client):
 async def async_auth_headers(async_client):
     """Async variant: login with admin user and return Authorization headers."""
     resp = await async_client.post("/api/v1/auth/login", json={
-        "email": "admin@shadowmarket.ai",
-        "password": "admin123",
+        "email": "admin@swetha.in",
+        "password": "Swetha123!",
     })
     if resp.status_code == 200:
         data = resp.json()
@@ -170,8 +170,8 @@ async def async_auth_tokens(async_client):
     Useful when tests need access_token AND refresh_token.
     """
     resp = await async_client.post("/api/v1/auth/login", json={
-        "email": "admin@shadowmarket.ai",
-        "password": "admin123",
+        "email": "admin@swetha.in",
+        "password": "Swetha123!",
     })
     if resp.status_code == 200:
         return resp.json()
@@ -211,8 +211,8 @@ async def test_user(async_client):
         }
     # If registration fails (rate limit, etc.), fallback to demo
     return {
-        "email": "admin@shadowmarket.ai",
-        "password": "admin123",
+        "email": "admin@swetha.in",
+        "password": "Swetha123!",
         "data": {},
         "headers": {"Authorization": "Bearer demo-token-123"},
     }
