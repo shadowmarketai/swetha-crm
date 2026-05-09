@@ -92,6 +92,29 @@ def create_app() -> FastAPI:
     # ── Exception Handlers ───────────────────────────────────
     register_exception_handlers(application)
 
+    # ── Prometheus metrics ──────────────────────────────────
+    # Exposes /metrics with http_request_duration_seconds and
+    # http_requests_total. Disabled by default in tests (PROMETHEUS_ENABLED
+    # falls back to "1"). Set to "0" if you don't want the endpoint to be
+    # registered (e.g. the metrics container is using a different scrape
+    # target).
+    if os.environ.get("PROMETHEUS_ENABLED", "1") == "1":
+        try:
+            from prometheus_fastapi_instrumentator import Instrumentator
+            Instrumentator(
+                should_group_status_codes=True,
+                should_ignore_untemplated=True,
+                excluded_handlers=["/metrics", "/health.*", "/favicon.*"],
+            ).instrument(application).expose(
+                application,
+                endpoint="/metrics",
+                include_in_schema=False,
+                tags=["monitoring"],
+            )
+            logger.info("Prometheus instrumentation enabled at /metrics")
+        except Exception as exc:
+            logger.warning("Prometheus instrumentation skipped: %s", exc)
+
     # ── API info endpoint ──────────────────────────────────────
     @application.get("/api/info")
     async def api_info():
