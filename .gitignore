@@ -82,11 +82,15 @@ htmlcov/
 .nox/
 
 # ----- Data, Models, Logs -----
-# Anchored to root: these are ML artifact / data dirs at the repo root,
-# NOT the SQLAlchemy `src/api/models/` package or any source `data/` dirs.
-/data/
-/models/
-/logs/
+# `models/` matches both the root-level ML artifact dir and runtime 3D
+# assets in `frontend/public/models/` (GLB files dropped in locally — see
+# the README there). The SQLAlchemy ORM package at `src/api/models/` must
+# stay tracked, so we whitelist it explicitly below.
+data/
+models/
+logs/
+!src/api/models/
+!src/api/models/**
 *.wav
 *.mp3
 *.ogg
