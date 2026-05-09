@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    # Google Gemini 2.5 Flash Image (Nano Banana) — used for photoreal PEB renders.
+    # Get a key at https://aistudio.google.com/apikey
+    GEMINI_API_KEY: str = ""
 
     # ── CRM Integrations ────────────────────────────────────────
     ZOHO_CLIENT_ID: str = ""

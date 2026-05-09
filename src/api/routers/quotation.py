@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.permissions import require_permission
 from api.schemas.quotation import (
+    AIRenderRequest,
+    AIRenderResponse,
     BOQResult,
     PEBInput,
     QuotationCreate,
@@ -23,6 +25,9 @@ from api.schemas.quotation import (
     QuotationLogResponse,
     QuotationStatsResponse,
     StatusUpdate,
+    UpscaleRequest,
+    UpscaleResponse,
+    BrandCheckResult,
 )
 from api.schemas.common import MessageResponse, PaginatedResponse
 from api.services import quotation_service
@@ -378,3 +383,211 @@ async def get_logs(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"items": [_log_to_response(log) for log in logs]}
+
+
+# ── AI Photoreal Render Endpoints ────────────────────────────────
+
+
+@router.post(
+    "/ai-render/preview",
+    response_model=AIRenderResponse,
+    summary="Generate photoreal AI renders (no save)",
+)
+async def preview_ai_render(
+    payload: AIRenderRequest,
+    current_user: dict = Depends(require_permission("quotation", "read")),
+) -> AIRenderResponse:
+    """
+    Generate photoreal renders from a Three.js capture without persisting them
+    to a quotation. Use this when the user is exploring on `/quotation/ai-image`
+    before a quote exists, or just wants ad-hoc images.
+    """
+    from api.services import ai_render_service
+
+    if not ai_render_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="AI render is not configured. Set GEMINI_API_KEY in the server .env "
+                   "and restart the API.",
+        )
+
+    try:
+        renders = ai_render_service.generate_realistic_renders(
+            capture_b64=payload.capture_image,
+            params=payload.building_params,
+            lead={"company": payload.lead_company} if payload.lead_company else None,
+            angles=payload.angles,
+            force_regenerate=payload.force_regenerate,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not renders:
+        return AIRenderResponse(
+            renders=[],
+            saved_to_quotation=False,
+            message="The AI provider did not return any images. Try again, or check the "
+                    "API key and quota.",
+        )
+
+    if payload.check_brand:
+        _attach_brand_checks(renders, payload.building_params)
+
+    msg = None
+    if all(r.get("cached") for r in renders):
+        msg = "All renders served from cache (no Gemini cost)."
+    return AIRenderResponse(renders=renders, saved_to_quotation=False, message=msg)
+
+
+@router.post(
+    "/{quotation_id}/ai-render",
+    response_model=AIRenderResponse,
+    summary="Generate photoreal AI renders and attach to quotation",
+)
+async def generate_ai_render_for_quote(
+    quotation_id: int,
+    payload: AIRenderRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_permission("quotation", "update")),
+) -> AIRenderResponse:
+    """
+    Generate photoreal renders and append their URLs to `quote.ai_render_urls`,
+    so the public render gallery (`/view/{token}/render`) picks them up.
+    """
+    from api.models.quotation import Quotation
+    from api.services import ai_render_service
+
+    if not ai_render_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="AI render is not configured. Set GEMINI_API_KEY in the server .env "
+                   "and restart the API.",
+        )
+
+    user_id = _get_user_id(current_user)
+    quote = (
+        db.query(Quotation)
+        .filter(
+            Quotation.id == quotation_id,
+            Quotation.user_id == user_id,
+            Quotation.is_deleted == False,  # noqa: E712
+        )
+        .first()
+    )
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+
+    # Resolve params: explicit payload wins, fall back to the stored building_params.
+    params = payload.building_params or (quote.building_params or {})
+    lead_ctx = None
+    if payload.lead_company:
+        lead_ctx = {"company": payload.lead_company}
+    elif quote.client_name:
+        lead_ctx = {"company": quote.client_name}
+
+    try:
+        renders = ai_render_service.generate_realistic_renders(
+            capture_b64=payload.capture_image,
+            params=params,
+            lead=lead_ctx,
+            quotation_id=quotation_id,
+            angles=payload.angles,
+            force_regenerate=payload.force_regenerate,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not renders:
+        return AIRenderResponse(
+            renders=[],
+            saved_to_quotation=False,
+            message="The AI provider did not return any images. Nothing was saved.",
+        )
+
+    if payload.check_brand:
+        _attach_brand_checks(renders, params)
+
+    all_cached = all(r.get("cached") for r in renders)
+    new_urls = [r["url"] for r in renders]
+
+    # Only persist new URLs to the quotation when at least one was freshly
+    # generated; pure cache hits already exist in ai_render_urls.
+    if not all_cached:
+        existing_urls = list(quote.ai_render_urls or [])
+        # Avoid duplicating if a cached URL is already in the list
+        merged = existing_urls + [u for u in new_urls if u not in existing_urls]
+        quote.ai_render_urls = merged
+        db.add(quote)
+        db.commit()
+        db.refresh(quote)
+        msg = f"{len(renders)} render(s) attached to quotation #{quotation_id}"
+    else:
+        msg = "All renders served from cache (no Gemini cost, nothing new saved)."
+
+    return AIRenderResponse(
+        renders=renders,
+        saved_to_quotation=not all_cached,
+        message=msg,
+    )
+
+
+# ── Helper: attach brand-consistency checks to a render list ─────
+
+
+def _attach_brand_checks(renders: list[dict], params: dict) -> None:
+    """Mutates `renders` in place — adds a `brand_check` field to each item."""
+    from api.services import ai_render_service
+    from pathlib import Path as _Path
+
+    btype = ai_render_service._classify_building_type(params)
+    palette = ai_render_service._resolve_palette(params, btype)
+    for r in renders:
+        url = r.get("url", "")
+        if not url:
+            continue
+        filename = url.rsplit("/", 1)[-1]
+        path = ai_render_service.RENDERS_DIR / filename
+        result = ai_render_service.check_brand_consistency(_Path(path), palette)
+        r["brand_check"] = result
+
+
+# ── POST /ai-render/upscale — 2x resample an existing render ─────
+
+
+@router.post(
+    "/ai-render/upscale",
+    response_model=UpscaleResponse,
+    summary="Upscale an existing AI render to 2x using LANCZOS resampling",
+)
+async def upscale_existing_render(
+    payload: UpscaleRequest,
+    current_user: dict = Depends(require_permission("quotation", "read")),
+) -> UpscaleResponse:
+    from api.services import ai_render_service
+
+    # Strip URL prefix to get the bare filename
+    if not payload.render_url.startswith("/renders/"):
+        raise HTTPException(
+            status_code=400,
+            detail="render_url must look like /renders/filename.png",
+        )
+    filename = payload.render_url[len("/renders/"):]
+
+    new_url = ai_render_service.upscale_render(filename, scale=payload.scale)
+    if not new_url:
+        raise HTTPException(
+            status_code=404,
+            detail="Source render not found, or upscaling failed",
+        )
+
+    # Probe dimensions of the new file
+    src = ai_render_service.RENDERS_DIR / new_url[len("/renders/"):]
+    width = height = None
+    try:
+        from PIL import Image
+        with Image.open(src) as im:
+            width, height = im.size
+    except Exception:
+        pass
+
+    return UpscaleResponse(url=new_url, width=width, height=height)

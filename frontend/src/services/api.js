@@ -4,6 +4,14 @@ import toast from 'react-hot-toast';
 // Base API configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Resolve a server-relative media path (e.g. "/renders/foo.png") into an absolute URL
+// so <img src=…> works correctly under both dev (Vite at :5173) and bundled-SPA modes.
+export const mediaUrl = (path) => {
+  if (!path) return '';
+  if (/^(https?:|data:|blob:)/i.test(path)) return path;
+  return `${API_BASE_URL}${path.startsWith('/') ? path : '/' + path}`;
+};
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -406,6 +414,15 @@ export const quotationAPI = {
   getLogs: (id) => api.get(`/api/v1/quotations/${id}/logs`),
   getStats: () => api.get('/api/v1/quotations/stats'),
   getByLead: (leadId) => api.get(`/api/v1/quotations/by-lead/${leadId}`),
+
+  // ── AI photoreal render (Gemini 2.5 Flash Image) ──
+  // Image generation can take 30–60 sec for 3 angles, so we use a longer timeout.
+  previewAIRender: (payload) =>
+    api.post('/api/v1/quotations/ai-render/preview', payload, { timeout: 180000 }),
+  generateAIRender: (quotationId, payload) =>
+    api.post(`/api/v1/quotations/${quotationId}/ai-render`, payload, { timeout: 180000 }),
+  upscaleAIRender: (renderUrl, scale = 2) =>
+    api.post('/api/v1/quotations/ai-render/upscale', { render_url: renderUrl, scale }, { timeout: 60000 }),
 };
 
 // ============================================
@@ -607,67 +624,6 @@ export const voiceAgentAPI = {
   getRecordingAudio: (recordingId) =>
     api.get(`/api/v1/agent/recordings/${recordingId}/audio`, { responseType: 'blob' }),
   analyzeRecording: (recordingId) => api.post(`/api/v1/agent/recordings/${recordingId}/analyze`),
-};
-
-// ============================================
-// SUPER ADMIN API (platform console)
-// ============================================
-// All endpoints require is_super_admin = true on the backend.
-// 403 if a tenant user calls these.
-export const superAdminAPI = {
-  // Platform stats
-  getStats: () => api.get('/api/v1/admin/stats'),
-
-  // Tenants
-  listTenants: () => api.get('/api/v1/admin/tenants'),
-  getTenant: (tenantId) => api.get(`/api/v1/admin/tenants/${tenantId}`),
-  createTenant: (payload) => api.post('/api/v1/admin/tenants', payload),
-  updateTenant: (tenantId, payload) => api.put(`/api/v1/admin/tenants/${tenantId}`, payload),
-  deleteTenant: (tenantId) => api.delete(`/api/v1/admin/tenants/${tenantId}`),
-
-  // Cross-tenant users
-  listUsers: (params = {}) => api.get('/api/v1/admin/users', { params }),
-  getUser: (userId) => api.get(`/api/v1/admin/users/${userId}`),
-  createUser: (payload) => api.post('/api/v1/admin/users', payload),
-  updateUser: (userId, payload) => api.put(`/api/v1/admin/users/${userId}`, payload),
-  resetUserPassword: (userId, newPassword) =>
-    api.post(`/api/v1/admin/users/${userId}/reset-password`, { new_password: newPassword }),
-  activateUser: (userId) => api.post(`/api/v1/admin/users/${userId}/activate`),
-  deactivateUser: (userId) => api.post(`/api/v1/admin/users/${userId}/deactivate`),
-  deleteUser: (userId) => api.delete(`/api/v1/admin/users/${userId}`),
-  moveUserTenant: (userId, tenantId) =>
-    api.post(`/api/v1/admin/users/${userId}/move-tenant`, { tenant_id: tenantId }),
-
-  // System features (catalog)
-  listFeatures: () => api.get('/api/v1/admin/features'),
-
-  // Per-tenant feature toggles
-  getTenantFeatures: (tenantId) => api.get(`/api/v1/admin/tenants/${tenantId}/features`),
-  toggleTenantFeature: (tenantId, featureKey, enabled) =>
-    api.put(`/api/v1/admin/tenants/${tenantId}/features/${featureKey}`, { enabled }),
-
-  // Plans
-  listPlans: () => api.get('/api/v1/admin/plans'),
-
-  // Platform support tickets (super admin inbox)
-  listTickets: (params = {}) => api.get('/api/v1/admin/tickets', { params }),
-  getTicket: (ticketId) => api.get(`/api/v1/admin/tickets/${ticketId}`),
-  updateTicket: (ticketId, payload) => api.put(`/api/v1/admin/tickets/${ticketId}`, payload),
-  replyToTicket: (ticketId, body) => api.post(`/api/v1/admin/tickets/${ticketId}/reply`, { body }),
-  resolveTicket: (ticketId) => api.post(`/api/v1/admin/tickets/${ticketId}/resolve`),
-};
-
-// ============================================
-// PLATFORM SUPPORT API (tenant side)
-// ============================================
-// Used by tenant admins to raise support tickets to the platform team.
-// Super admins should NOT call these — backend returns 403.
-export const platformSupportAPI = {
-  listMyTickets: (params = {}) => api.get('/api/v1/platform-support/tickets', { params }),
-  getMyTicket: (ticketId) => api.get(`/api/v1/platform-support/tickets/${ticketId}`),
-  createTicket: (payload) => api.post('/api/v1/platform-support/tickets', payload),
-  replyToTicket: (ticketId, body) =>
-    api.post(`/api/v1/platform-support/tickets/${ticketId}/reply`, { body }),
 };
 
 // ============================================

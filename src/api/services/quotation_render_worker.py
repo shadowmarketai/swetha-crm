@@ -151,6 +151,8 @@ def _tick() -> int:
 
 def _worker_loop() -> None:
     logger.info("Quotation render worker loop started")
+    last_cleanup = 0.0
+    cleanup_interval = 86400.0   # once per 24h
     while not _stop_event.is_set():
         try:
             n = _tick()
@@ -158,8 +160,93 @@ def _worker_loop() -> None:
                 logger.debug(f"Render worker processed {n} intakes")
         except Exception as e:
             logger.exception(f"Render worker tick failed: {e}")
+
+        # Daily cleanup of stale AI renders
+        import time as _time
+        now = _time.time()
+        if now - last_cleanup > cleanup_interval:
+            try:
+                _cleanup_stale_renders()
+            except Exception as e:
+                logger.exception(f"Render cleanup failed: {e}")
+            last_cleanup = now
+
         _stop_event.wait(POLL_INTERVAL_SEC)
     logger.info("Quotation render worker loop stopped")
+
+
+def _cleanup_stale_renders(max_age_days: int = 30) -> dict:
+    """
+    Delete AI render PNGs older than `max_age_days` that aren't referenced
+    by any quotation's ai_render_urls. Also prunes the render cache index.
+
+    Safe to call repeatedly. Returns a summary dict for logging/tests.
+    """
+    import time as _time
+    from pathlib import Path
+    from api.services.ai_render_service import RENDERS_DIR
+
+    cutoff = _time.time() - (max_age_days * 86400)
+    removed = 0
+    kept_ref = 0
+    kept_recent = 0
+
+    # Collect every URL referenced by any quotation
+    SessionFactory = get_session_factory()
+    referenced: set[str] = set()
+    try:
+        with SessionFactory() as db:
+            quotes = db.query(Quotation).all()
+            for q in quotes:
+                for u in (q.ai_render_urls or []):
+                    if isinstance(u, str):
+                        referenced.add(u.rsplit("/", 1)[-1])
+    except Exception as e:
+        logger.warning("Could not load referenced renders: %s", e)
+        return {"removed": 0, "kept_ref": 0, "kept_recent": 0, "error": str(e)}
+
+    for path in Path(RENDERS_DIR).glob("*.png"):
+        name = path.name
+        if name in referenced:
+            kept_ref += 1
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > cutoff:
+            kept_recent += 1
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as e:
+            logger.warning("Could not delete %s: %s", path, e)
+
+    # Prune cache entries whose files no longer exist
+    try:
+        from api.services.ai_render_service import _CACHE_FILE, _cache_lock
+        import json
+        with _cache_lock:
+            if _CACHE_FILE.exists():
+                idx = json.loads(_CACHE_FILE.read_text() or "{}")
+                pruned = {
+                    key: items
+                    for key, items in idx.items()
+                    if all((Path(RENDERS_DIR) / Path(it["url"]).name).exists()
+                           for it in items)
+                }
+                if len(pruned) != len(idx):
+                    _CACHE_FILE.write_text(json.dumps(pruned, indent=2))
+                    logger.info("Cache pruned: %d → %d entries", len(idx), len(pruned))
+    except Exception as e:
+        logger.warning("Cache prune failed: %s", e)
+
+    summary = {"removed": removed, "kept_ref": kept_ref, "kept_recent": kept_recent}
+    if removed:
+        logger.info("Render cleanup: removed=%d, kept-referenced=%d, kept-recent=%d",
+                    removed, kept_ref, kept_recent)
+    return summary
 
 
 def start_worker() -> None:
