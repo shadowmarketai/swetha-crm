@@ -8,11 +8,17 @@ Handles webhook ingestion, API polling, and source config management.
 import hashlib
 import hmac
 import logging
+import secrets
+import time
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
+import jwt as _jwt
+from fastapi import APIRouter, Body, Depends, HTTPException, Header, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 
@@ -377,6 +383,117 @@ async def delete_config(
     db.commit()
 
 
+# ── One-click connectors ─────────────────────────────────────────
+
+
+@router.post("/justdial/auto-connect", response_model=LeadSourceConfigResponse, status_code=201)
+async def justdial_auto_connect(
+    user: dict = Depends(require_permission("integrations", "create")),
+    db: Session = Depends(get_db),
+):
+    """
+    One-click JustDial: generate a strong webhook key server-side, upsert the
+    config, return it. Caller never picks the key — eliminates the awkward
+    "invent a secret and remember it" UX. The frontend then displays the
+    masked key and webhook URL with copy buttons; the secret can be revealed
+    once via /justdial/reveal-key (call within 5 minutes of creation).
+    """
+    user_id = user["id"]
+    new_key = secrets.token_urlsafe(32)
+
+    existing = db.execute(
+        select(LeadSourceConfig).where(
+            and_(
+                LeadSourceConfig.user_id == user_id,
+                LeadSourceConfig.provider == LeadSourceProvider.JUSTDIAL,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.api_key = new_key
+        existing.is_active = True
+        config = existing
+    else:
+        config = LeadSourceConfig(
+            user_id=user_id,
+            provider=LeadSourceProvider.JUSTDIAL,
+            api_key=new_key,
+            is_active=True,
+        )
+        db.add(config)
+
+    db.commit()
+    db.refresh(config)
+
+    # Stash the plaintext key so the SPA can show it once.
+    _purge_expired_oauth_sessions()
+    reveal_token = secrets.token_urlsafe(16)
+    _OAUTH_SESSIONS[f"jd_reveal_{reveal_token}"] = {
+        "user_id": user_id,
+        "config_id": config.id,
+        "api_key": new_key,
+        "expires_at": time.time() + 300,  # 5 min
+    }
+
+    response = _config_to_response(config)
+    return JSONResponse(
+        content={**response.model_dump(), "reveal_token": reveal_token},
+        status_code=201,
+    )
+
+
+@router.get("/justdial/reveal-key/{reveal_token}")
+async def justdial_reveal_key(
+    reveal_token: str,
+    user: dict = Depends(require_permission("integrations", "read")),
+):
+    """One-shot reveal of a freshly generated JustDial webhook key."""
+    _purge_expired_oauth_sessions()
+    sess_key = f"jd_reveal_{reveal_token}"
+    sess = _OAUTH_SESSIONS.get(sess_key)
+    if not sess or sess["user_id"] != user["id"]:
+        raise HTTPException(status_code=404, detail="Reveal token expired or invalid")
+    plain = sess["api_key"]
+    _OAUTH_SESSIONS.pop(sess_key, None)
+    return {"api_key": plain, "config_id": sess["config_id"]}
+
+
+class _IndiaMartTestBody(BaseModel):
+    api_key: str
+
+
+@router.post("/indiamart/test")
+async def indiamart_test_connection(
+    payload: _IndiaMartTestBody = Body(...),
+    user: dict = Depends(require_permission("integrations", "create")),
+):
+    """
+    Validate an IndiaMart CRM API key by hitting the live endpoint with a
+    1-day window. Returns ok=True on a 200 response so the SPA can give an
+    immediate green/red signal before persisting the key.
+    """
+    if not payload.api_key or len(payload.api_key.strip()) < 6:
+        raise HTTPException(status_code=400, detail="API key looks too short")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                settings.INDIAMART_CRM_API_URL,
+                params={"glusr_crm_key": payload.api_key.strip()},
+            )
+    except Exception as exc:
+        return {"ok": False, "error": f"Network error: {exc}"}
+
+    if r.status_code == 200:
+        return {"ok": True, "status_code": 200}
+
+    if r.status_code in (401, 403):
+        return {"ok": False, "error": "Invalid API key — IndiaMart rejected the request"}
+
+    return {"ok": False, "error": f"IndiaMart returned HTTP {r.status_code}", "status_code": r.status_code}
+
+
 # ── Stats ────────────────────────────────────────────────────────
 
 
@@ -474,15 +591,6 @@ def _config_to_response(config: LeadSourceConfig) -> LeadSourceConfigResponse:
 # same worker by sticky-session or short-lived cookie in any sane
 # proxy setup; if you scale this past one worker without sticky
 # sessions, replace _OAUTH_SESSIONS with a Redis-backed store.
-
-import secrets
-import time
-from urllib.parse import urlencode
-
-import jwt as _jwt
-from fastapi import Body
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
 
 from api.dependencies import get_current_user
 
@@ -707,6 +815,30 @@ async def facebook_oauth_connect(
 
     db.commit()
     db.refresh(config)
+
+    # Auto-subscribe the page to leadgen webhook events. Without this, the
+    # connect screen would have to instruct the user to "Go to Meta Developer
+    # Console → Webhooks → Lead Ads → Add this page", which is exactly the
+    # manual step OAuth was supposed to remove. With pages_manage_metadata
+    # in scope, we can do the subscription via Graph API ourselves.
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            sub = await client.post(
+                f"https://graph.facebook.com/{settings.META_GRAPH_API_VERSION}/{page['id']}/subscribed_apps",
+                params={
+                    "subscribed_fields": "leadgen",
+                    "access_token": page["access_token"],
+                },
+            )
+            if sub.status_code == 200 and sub.json().get("success"):
+                logger.info("Page %s auto-subscribed to leadgen webhook", page["id"])
+            else:
+                logger.warning(
+                    "Auto-subscribe failed for page %s: %s %s",
+                    page["id"], sub.status_code, sub.text[:200],
+                )
+    except Exception as exc:
+        logger.warning("Auto-subscribe failed for page %s: %s", page["id"], exc)
     _OAUTH_SESSIONS.pop(payload.session_id, None)
     logger.info("Facebook page connected via OAuth: user=%s page=%s", user_id, page["id"])
     return _config_to_response(config)

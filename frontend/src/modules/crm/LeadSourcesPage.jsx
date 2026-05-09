@@ -19,37 +19,38 @@ const SOURCES = [
   {
     provider: 'indiamart',
     name: 'IndiaMart',
-    description: 'B2B marketplace lead capture via CRM API polling',
+    description: 'Paste your IndiaMart CRM API key \u2014 we\'ll validate it and start polling.',
     gradient: 'from-sky-500 to-blue-600',
     tint: 'rgba(56,189,248,0.08)',
+    connectMode: 'api_key',
     fields: [
-      { key: 'api_key', label: 'CRM API Key', placeholder: 'Your IndiaMart CRM API Key', type: 'password' },
+      { key: 'api_key', label: 'IndiaMart CRM API Key', placeholder: 'Paste the key from your IndiaMart dashboard', type: 'password' },
     ],
     webhookUrl: null,
-    helpText: 'Get your CRM API key from IndiaMart seller dashboard \u2192 Lead Manager \u2192 API Settings',
+    helpText: 'Find this key inside IndiaMart Seller Dashboard \u2192 Lead Manager \u2192 API Settings.',
   },
   {
     provider: 'justdial',
     name: 'JustDial',
-    description: 'Local business listing leads via webhook',
+    description: 'One click \u2014 we generate a webhook key and tell you exactly what to paste into JustDial.',
     gradient: 'from-orange-500 to-amber-600',
     tint: 'rgba(251,146,60,0.08)',
-    fields: [
-      { key: 'api_key', label: 'Webhook API Key', placeholder: 'Generate a key for JustDial to use', type: 'text' },
-    ],
+    connectMode: 'auto',
+    fields: [],
     webhookUrl: '/api/v1/lead-sources/justdial/webhook',
-    helpText: 'Share the webhook URL and API key with JustDial to start receiving leads',
+    helpText: 'After connecting, copy the webhook URL and key into JustDial Lead Manager \u2192 Webhooks.',
   },
   {
     provider: 'facebook_leads',
     name: 'Facebook Lead Ads',
-    description: 'Connect with Facebook to ingest Meta Lead Ads form submissions',
+    description: 'Login with Facebook, pick a page, done \u2014 we wire up the webhook for you.',
     gradient: 'from-indigo-500 to-violet-600',
     tint: 'rgba(99,102,241,0.08)',
+    connectMode: 'oauth',
     oauth: true,
     fields: [],
-    webhookUrl: '/api/v1/lead-sources/facebook/webhook',
-    helpText: 'Click "Login with Facebook" below \u2014 we\'ll redirect you to Meta, you pick a Page, and we\'ll save the rest. The webhook URL above goes into Meta Developer Console \u2192 Webhooks \u2192 Lead Ads.',
+    webhookUrl: null,
+    helpText: 'No manual webhook config needed \u2014 we subscribe the page automatically using the Graph API after you finish OAuth.',
   },
 ];
 
@@ -62,7 +63,10 @@ function MiniStat({ label, value }) {
   );
 }
 
-function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSaving, isSyncing, isOAuthLoading }) {
+function SourceCard({
+  source, config, stats, onSave, onSync, onOAuthStart, onAutoConnect, onTest,
+  isSaving, isSyncing, isOAuthLoading, isAutoConnecting, isTesting,
+}) {
   const { can } = usePermissions();
   const canWrite = can('integrations', 'create') || can('crm', 'create');
   const [expanded, setExpanded] = useState(false);
@@ -76,7 +80,7 @@ function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSav
   const isConfigured = !!config;
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const payload = { provider: source.provider, ...formData };
     if (payload.default_tags && typeof payload.default_tags === 'string') {
       payload.default_tags = payload.default_tags.split(',').map((t) => t.trim()).filter(Boolean);
@@ -86,6 +90,13 @@ function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSav
     Object.keys(payload).forEach((k) => {
       if (payload[k] === '') delete payload[k];
     });
+
+    // For api-key providers, validate the key before persisting so the user
+    // gets immediate "wrong key" feedback instead of silent zero-poll runs.
+    if (source.connectMode === 'api_key' && onTest && payload.api_key) {
+      const ok = await onTest(payload.api_key);
+      if (!ok) return;
+    }
     onSave(payload);
   };
 
@@ -182,7 +193,7 @@ function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSav
             </Field>
           )}
 
-          {source.oauth && canWrite && (
+          {source.connectMode === 'oauth' && canWrite && (
             <Field
               label="Connection"
               hint={isConfigured ? `Connected to page ID ${config.page_id}` : 'Sign in with Facebook and pick a Page'}
@@ -197,6 +208,28 @@ function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSav
                   <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Redirecting…</>
                 ) : (
                   <><Facebook className="w-4 h-4 mr-2" /> {isConfigured ? 'Reconnect with Facebook' : 'Login with Facebook'}</>
+                )}
+              </Button>
+            </Field>
+          )}
+
+          {source.connectMode === 'auto' && canWrite && (
+            <Field
+              label="Connection"
+              hint={isConfigured ? 'Connected — paste the webhook URL + key into JustDial' : 'One click generates a webhook URL + secret key'}
+            >
+              <Button
+                onClick={onAutoConnect}
+                disabled={isAutoConnecting}
+                className="w-full bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white"
+                size="lg"
+              >
+                {isAutoConnecting ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating…</>
+                ) : isConfigured ? (
+                  'Regenerate Key'
+                ) : (
+                  'Connect JustDial'
                 )}
               </Button>
             </Field>
@@ -249,14 +282,91 @@ function SourceCard({ source, config, stats, onSave, onSync, onOAuthStart, isSav
             <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">{source.helpText}</p>
           </div>
 
-          {canWrite && (source.fields.length > 0 || source.webhookUrl) && (
-            <Button onClick={handleSave} disabled={isSaving} className="w-full" size="lg">
-              {isSaving ? 'Saving...' : isConfigured ? 'Update Configuration' : 'Save Configuration'}
+          {canWrite && source.fields.length > 0 && (
+            <Button
+              onClick={handleSave}
+              disabled={isSaving || isTesting}
+              className="w-full"
+              size="lg"
+            >
+              {isTesting ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Testing…</>
+              ) : isSaving ? 'Saving…' : isConfigured ? 'Update Configuration' : 'Test & Save'}
             </Button>
           )}
         </div>
       )}
     </Card>
+  );
+}
+
+function JustDialKeyRevealModal({ apiKey, webhookUrl, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+      <Card className="w-full max-w-lg p-6 space-y-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">JustDial connected</h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Paste these two values into JustDial Lead Manager → Webhooks. The secret is shown only once.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <Field label="Webhook URL" hint="JustDial will POST new leads here">
+          <div className="flex items-center gap-2">
+            <code className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-xs text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 truncate font-mono">
+              {webhookUrl}
+            </code>
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => {
+                navigator.clipboard.writeText(webhookUrl);
+                toast.success('Webhook URL copied');
+              }}
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
+          </div>
+        </Field>
+
+        <Field label="Secret Key" hint="Send as X-API-Key header — store this somewhere safe">
+          <div className="flex items-center gap-2">
+            <code className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-xs text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 truncate font-mono">
+              {apiKey}
+            </code>
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => {
+                navigator.clipboard.writeText(apiKey);
+                toast.success('Secret key copied');
+              }}
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
+          </div>
+        </Field>
+
+        <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-800/40">
+          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+            Save the secret now — closing this dialog hides it permanently. If you lose it, click "Regenerate Key" to mint a new one.
+          </p>
+        </div>
+
+        <Button onClick={onClose} className="w-full" size="lg">Done</Button>
+      </Card>
+    </div>
   );
 }
 
@@ -337,6 +447,9 @@ export default function LeadSourcesPage() {
   const [isOAuthLoading, setIsOAuthLoading] = useState(false);
   const [fbPicker, setFbPicker] = useState(null); // {sessionId, pages} | null
   const [isConnectingFb, setIsConnectingFb] = useState(false);
+  const [isAutoConnecting, setIsAutoConnecting] = useState(false);
+  const [jdReveal, setJdReveal] = useState(null); // {apiKey, webhookUrl} | null
+  const [isTestingIndiaMart, setIsTestingIndiaMart] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -399,6 +512,56 @@ export default function LeadSourcesPage() {
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not start Facebook login');
       setIsOAuthLoading(false);
+    }
+  };
+
+  const handleAutoConnectJustDial = async () => {
+    setIsAutoConnecting(true);
+    try {
+      const res = await api.post('/api/v1/lead-sources/justdial/auto-connect');
+      const revealToken = res.data?.reveal_token;
+      const baseUrl = window.location.origin;
+      const webhookUrl = `${baseUrl}/api/v1/lead-sources/justdial/webhook`;
+
+      let apiKey = null;
+      if (revealToken) {
+        try {
+          const reveal = await api.get(`/api/v1/lead-sources/justdial/reveal-key/${revealToken}`);
+          apiKey = reveal.data?.api_key;
+        } catch {
+          // reveal failed; user will have to regenerate
+        }
+      }
+
+      if (apiKey) {
+        setJdReveal({ apiKey, webhookUrl });
+        toast.success('JustDial connected — copy the key now');
+      } else {
+        toast.success('JustDial connected (key reveal expired — click Regenerate Key)');
+      }
+      fetchData();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not connect JustDial');
+    } finally {
+      setIsAutoConnecting(false);
+    }
+  };
+
+  const handleTestIndiaMart = async (apiKey) => {
+    setIsTestingIndiaMart(true);
+    try {
+      const res = await api.post('/api/v1/lead-sources/indiamart/test', { api_key: apiKey });
+      if (res.data?.ok) {
+        toast.success('IndiaMart key validated');
+        return true;
+      }
+      toast.error(res.data?.error || 'IndiaMart key rejected');
+      return false;
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Validation request failed');
+      return false;
+    } finally {
+      setIsTestingIndiaMart(false);
     }
   };
 
@@ -495,10 +658,14 @@ export default function LeadSourcesPage() {
               stats={null}
               onSave={handleSave}
               onSync={handleSync}
-              onOAuthStart={source.oauth ? handleOAuthStartFacebook : undefined}
+              onOAuthStart={source.connectMode === 'oauth' ? handleOAuthStartFacebook : undefined}
+              onAutoConnect={source.connectMode === 'auto' ? handleAutoConnectJustDial : undefined}
+              onTest={source.provider === 'indiamart' ? handleTestIndiaMart : undefined}
               isSaving={isSaving}
               isSyncing={isSyncing}
               isOAuthLoading={isOAuthLoading}
+              isAutoConnecting={isAutoConnecting}
+              isTesting={source.provider === 'indiamart' ? isTestingIndiaMart : false}
             />
           ))}
         </div>
@@ -512,10 +679,14 @@ export default function LeadSourcesPage() {
               stats={getStatsForProvider(source.provider)}
               onSave={handleSave}
               onSync={handleSync}
-              onOAuthStart={source.oauth ? handleOAuthStartFacebook : undefined}
+              onOAuthStart={source.connectMode === 'oauth' ? handleOAuthStartFacebook : undefined}
+              onAutoConnect={source.connectMode === 'auto' ? handleAutoConnectJustDial : undefined}
+              onTest={source.provider === 'indiamart' ? handleTestIndiaMart : undefined}
               isSaving={isSaving}
               isSyncing={isSyncing}
               isOAuthLoading={isOAuthLoading}
+              isAutoConnecting={isAutoConnecting}
+              isTesting={source.provider === 'indiamart' ? isTestingIndiaMart : false}
             />
           ))}
         </div>
@@ -528,6 +699,14 @@ export default function LeadSourcesPage() {
           onClose={() => setFbPicker(null)}
           onConnect={handleConnectFacebookPage}
           isConnecting={isConnectingFb}
+        />
+      )}
+
+      {jdReveal && (
+        <JustDialKeyRevealModal
+          apiKey={jdReveal.apiKey}
+          webhookUrl={jdReveal.webhookUrl}
+          onClose={() => setJdReveal(null)}
         />
       )}
     </div>
