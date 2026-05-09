@@ -11,9 +11,8 @@ Three logical surfaces:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -33,7 +32,6 @@ from api.schemas.quotation_template import (
     TemplateUpdate,
     TemplateResponse,
     IntakeSubmit,
-    IntakeResponse,
     CalcRequest,
     CalcResponse,
     OfferPropose,

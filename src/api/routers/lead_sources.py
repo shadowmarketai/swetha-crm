@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 

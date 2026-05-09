@@ -9,7 +9,6 @@ Endpoints for intelligent quotation generation:
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel

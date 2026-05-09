@@ -238,7 +238,7 @@ class TestQuotationPdfIsolation:
             headers=bob["headers"],
         )
         assert verify.status_code == 200, (
-            f"Bob's quotation was deleted by Alice's failed delete request"
+            "Bob's quotation was deleted by Alice's failed delete request"
         )
 
 

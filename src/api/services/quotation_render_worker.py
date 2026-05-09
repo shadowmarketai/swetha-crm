@@ -11,10 +11,8 @@ Usage:
     start_worker()   # kick off once at FastAPI startup
 """
 
-import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session

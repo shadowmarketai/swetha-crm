@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_async_db
 from api.permissions import require_permission
 from api.schemas.voice_agent import (
-    VoiceCloneRequest,
     VoiceResponse,
     VoiceTestRequest,
     KnowledgeAddRequest,

@@ -4,7 +4,7 @@ VoiceFlow Marketing AI - Appointment Schemas (Pydantic v2)
 """
 
 from datetime import datetime, time, date
-from typing import Optional, List, Any
+from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field, EmailStr
 

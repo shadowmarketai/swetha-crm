@@ -5,9 +5,7 @@ Phone normalization, name splitting, normalizers (IndiaMart, JustDial, Facebook)
 deduplication, and full ingestion flow.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone
 
 from api.services.lead_ingestion_service import (
     normalize_phone,
@@ -18,7 +16,7 @@ from api.services.lead_ingestion_service import (
     find_duplicate_lead,
     ingest_lead,
 )
-from api.models.crm import Lead, LeadSource, LeadStatus
+from api.models.crm import Lead, LeadSource
 
 
 # ── Phone Normalization ──────────────────────────────────────────

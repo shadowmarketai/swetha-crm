@@ -11,8 +11,7 @@ Uses reportlab for PDF generation.
 
 import io
 import math
-import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -355,7 +354,7 @@ def _building_description(story, styles, data):
         ["6", "Wall Height", f"{Hw:.0f}'"],
         ["7", "Cladding Height", f"{Hclad:.0f}'"],
         ["8", "Roof Slope", "1 in 10"],
-        ["9", "Column", f"Steel column from Finished floor level (FFL)"],
+        ["9", "Column", "Steel column from Finished floor level (FFL)"],
         ["10", "Purlin/Grit sections", "120 GSM Galvanized Cold formed section"],
         ["11", "Frame type", "Rigid"],
         ["12", "Sheeting profile & Area", "Trapezoidal profile & Area as per drawing"],
@@ -498,7 +497,7 @@ def _price_and_payment(story, styles, data, boq, md_quoted_rate=None):
          Paragraph("<b>Total Amount (Rs.)</b>", s["SMALL_BOLD"]),
          Paragraph("<b>Remarks</b>", s["SMALL_BOLD"])],
         [Paragraph("1.0", s["SMALL"]),
-         Paragraph(f"PEB BUILDING - FABRICATION, ERECTION &amp; ROOFING SHEET WORKS AS PER ATTACHED BOQ", s["SMALL"]),
+         Paragraph("PEB BUILDING - FABRICATION, ERECTION &amp; ROOFING SHEET WORKS AS PER ATTACHED BOQ", s["SMALL"]),
          Paragraph(_fmt_inr(total_amount), s["CELL_R"]),
          Paragraph("", s["SMALL"])],
         [Paragraph("", s["SMALL"]),
@@ -713,8 +712,8 @@ def _summary_page(story, styles, data, boq, md_quoted_rate=None):
     header_data = [
         [Paragraph(f"<b>Project Name :</b> {project_name}", s["SMALL"]),
          Paragraph("", s["SMALL"])],
-        [Paragraph(f"<b>Client :</b>", s["SMALL"]),
-         Paragraph(f"<b>Turnkey Contractor:</b>", s["SMALL"])],
+        [Paragraph("<b>Client :</b>", s["SMALL"]),
+         Paragraph("<b>Turnkey Contractor:</b>", s["SMALL"])],
         [Paragraph(f"{client_name}", s["SMALL"]),
          Paragraph(COMPANY["name"], s["SMALL"])],
     ]

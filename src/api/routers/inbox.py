@@ -22,10 +22,10 @@ from datetime import datetime, timezone
 from email.header import decode_header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError

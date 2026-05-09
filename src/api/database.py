@@ -254,7 +254,7 @@ def init_models():
 
 def _migrate_quotations_schema(engine):
     """Add forward-compat columns to quotations table if missing."""
-    from sqlalchemy import inspect as sa_inspect, text
+    from sqlalchemy import inspect as sa_inspect
 
     inspector = sa_inspect(engine)
     if "quotations" not in inspector.get_table_names():
@@ -749,7 +749,8 @@ def _seed_defaults():
         # ── Step 6: Demo calls ──
         call_count = conn.execute("SELECT COUNT(*) FROM calls").fetchone()[0]
         if call_count == 0:
-            import random, datetime
+            import random
+            import datetime
             now = datetime.datetime.utcnow()
             statuses = ["completed", "completed", "completed", "no_answer", "busy", "failed"]
             sentiments = ["positive", "neutral", "negative", "positive", "positive", "neutral"]
@@ -899,7 +900,7 @@ def _seed_saas_control_layer():
 
         # Tenant and super admin already created in _seed_defaults()
         # Just assign any orphan users to the swetha tenant
-        conn.execute(f"""
+        conn.execute("""
             UPDATE users SET tenant_id='tenant-swetha'
             WHERE tenant_id IS NULL AND (is_super_admin=0 OR is_super_admin IS NULL)
         """)
@@ -946,7 +947,7 @@ def _seed_platform_tickets(conn, _ph):
     These tickets are raised by tenant admins to the platform team (super admin).
     Distinct from helpdesk tickets which are for tenants' own end-customers.
     """
-    import datetime, uuid as _uuid
+    import datetime
 
     if USE_POSTGRES:
         conn.cursor().execute("""

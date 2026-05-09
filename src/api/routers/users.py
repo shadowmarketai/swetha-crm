@@ -9,7 +9,7 @@ import logging
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import db
 from api.permissions import require_permission

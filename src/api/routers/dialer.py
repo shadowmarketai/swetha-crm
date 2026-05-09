@@ -10,8 +10,8 @@ API prefix: /api/v1/dialer
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -21,10 +21,8 @@ from api.models.dialer import (
     DialerMode, DialerCampaignStatus, CallDisposition,
 )
 from api.schemas.dialer import (
-    DialerCampaignCreate, DialerCampaignUpdate, DialerCampaignResponse,
-    DialerContactCreate, DialerContactBulkCreate,
-    DialerCallComplete, DialerCallResponse,
-    CampaignStatsResponse, DNCCreate,
+    DialerCampaignCreate, DialerCampaignUpdate, DialerContactBulkCreate,
+    DialerCallComplete, DNCCreate,
 )
 
 logger = logging.getLogger(__name__)

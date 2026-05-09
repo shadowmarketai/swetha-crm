@@ -12,7 +12,6 @@ Endpoints tested:
 import logging
 
 import pytest
-import pytest_asyncio
 
 logger = logging.getLogger(__name__)
 

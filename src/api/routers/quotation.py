@@ -28,7 +28,6 @@ from api.schemas.quotation import (
     StatusUpdate,
     UpscaleRequest,
     UpscaleResponse,
-    BrandCheckResult,
 )
 from api.schemas.common import MessageResponse, PaginatedResponse
 from api.services import quotation_service

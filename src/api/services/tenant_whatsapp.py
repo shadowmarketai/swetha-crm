@@ -15,7 +15,6 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from api.models.quotation_template import (
-    TenantMessagingProvider,
     TenantWhatsAppConfig,
 )
 from integrations.messaging.messaging_integration import MessagingFactory

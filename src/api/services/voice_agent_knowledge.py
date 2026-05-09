@@ -10,10 +10,10 @@ import re
 from typing import Optional
 
 import aiohttp
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models.voice_agent import KnowledgeDocument, EMBEDDING_DIM
+from api.models.voice_agent import KnowledgeDocument
 from api.config import settings
 
 logger = logging.getLogger(__name__)

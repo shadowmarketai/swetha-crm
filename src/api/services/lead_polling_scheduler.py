@@ -8,7 +8,6 @@ Polls all active IndiaMart configs at their configured intervals.
 import logging
 from datetime import datetime, timezone
 
-import httpx
 from sqlalchemy import select, and_
 
 from api.config import settings

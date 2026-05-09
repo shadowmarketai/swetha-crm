@@ -15,7 +15,6 @@ Two engines:
 import ast
 import logging
 import operator
-from typing import Any, Optional
 
 from api.models.quotation_template import QuotationTemplate, TemplateEngine
 from api.services.boq_engine import generate_full_boq

@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
 
 from api.models.crm import Lead, LeadSource, LeadStatus, Activity, ActivityType

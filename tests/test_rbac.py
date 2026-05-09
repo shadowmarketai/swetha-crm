@@ -29,7 +29,6 @@ from api.permissions import (
     PERMISSION_MATRIX,
     has_permission,
     get_accessible_modules,
-    get_role_permissions,
 )
 
 logger = logging.getLogger(__name__)
