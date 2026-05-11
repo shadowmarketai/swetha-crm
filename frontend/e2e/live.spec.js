@@ -63,6 +63,34 @@ test.describe('Swetha CRM — live deployment', () => {
     expect([401, 403]).toContain(res.status());
   });
 
+  test('voiceflow get-conversation requires auth', async ({ request }) => {
+    const res = await request.get(`${API}/api/v1/voiceflow/conversations/1`);
+    expect([401, 403]).toContain(res.status());
+  });
+
+  test('crm leads list requires auth', async ({ request }) => {
+    const res = await request.get(`${API}/api/v1/crm-leads`);
+    expect([401, 403]).toContain(res.status());
+  });
+
+  test('analytics summary requires auth (route survived voice removal)', async ({ request }) => {
+    const res = await request.get(`${API}/api/v1/analytics/summary`);
+    expect([401, 403]).toContain(res.status());
+  });
+
+  test('auth/register validates email, password, full_name', async ({ request }) => {
+    const res = await request.post(`${API}/api/v1/auth/register`, {
+      data: {},
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status()).toBe(422);
+    const body = await res.json();
+    const blob = JSON.stringify(body);
+    expect(blob).toMatch(/email/i);
+    expect(blob).toMatch(/password/i);
+    expect(blob).toMatch(/full_name|name/i);
+  });
+
   test('homepage serves SPA HTML', async ({ page }) => {
     await page.goto(BASE);
     // SPA shell loaded
