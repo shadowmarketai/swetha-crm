@@ -133,3 +133,4 @@ celerybeat.pid
 *.db
 *.db-shm
 *.db-wal
+frontend/test-results/
