@@ -79,7 +79,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # tini wraps so signals propagate; entrypoint.sh runs alembic upgrade head
 # (idempotent) before exec-ing uvicorn. Set SKIP_MIGRATIONS=1 to bypass.
-ENTRYPOINT ["tini", "--", "/app/scripts/entrypoint.sh"]
+# Invoking via /bin/sh avoids depending on the file's executable bit being
+# preserved through git → docker COPY (which doesn't always carry over).
+ENTRYPOINT ["tini", "--", "/bin/sh", "/app/scripts/entrypoint.sh"]
 
 CMD ["python", "-m", "uvicorn", "src.api.server:app", \
      "--host", "0.0.0.0", \
